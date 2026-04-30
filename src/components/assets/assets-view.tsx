@@ -13,16 +13,13 @@ import {
   type Asset,
   type AssetSource,
   type AssetValuation,
-  type FxRate,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function AssetsView({
   valuations,
-  fx,
 }: {
   valuations: AssetValuation[];
-  fx: FxRate;
 }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Asset | null>(null);
@@ -158,12 +155,12 @@ function Row({
       </div>
 
       <div className="text-right font-numeric text-sm tabular-nums">
-        {formatCurrency(v.nativeValue, a.currency, { decimals: 0 })}
+        {formatCurrency(v.nativeValue, a.currency, { decimals: 2 })}
       </div>
 
       <div className="text-right">
         <div className="font-numeric text-sm tabular-nums">
-          {formatCurrency(v.eurValue, "EUR", { decimals: 0 })}
+          {formatCurrency(v.eurValue, "EUR", { decimals: 2 })}
         </div>
         {v.eurGain !== undefined ? (
           <div
@@ -175,7 +172,7 @@ function Row({
             )}
           >
             {signed(v.eurGain, (n) =>
-              formatCurrency(n, "EUR", { decimals: 0 })
+              formatCurrency(n, "EUR", { decimals: 2 })
             )}{" "}
             {v.eurGainPct !== undefined &&
               `· ${signed(v.eurGainPct, (n) => formatPercent(n))}`}

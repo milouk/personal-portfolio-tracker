@@ -129,7 +129,7 @@ export function HistoryView({
                       fontSize: 12,
                     }}
                     formatter={(v) =>
-                      formatCurrency(Number(v), "EUR", { decimals: 0 })
+                      formatCurrency(Number(v), "EUR", { decimals: 2 })
                     }
                   />
                   <Area
@@ -414,7 +414,7 @@ function EventRow({ event }: { event: PortfolioEvent }) {
       break;
     case "snapshot":
       title = `Snapshot taken`;
-      subtitle = formatCurrency(event.totalEur, "EUR", { decimals: 0 });
+      subtitle = formatCurrency(event.totalEur, "EUR", { decimals: 2 });
       break;
   }
 

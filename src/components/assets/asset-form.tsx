@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,7 +75,18 @@ const TYPE_FIELDS: Record<AssetType, Set<keyof FormData>> = {
   card: new Set(["cardLast4", "cardNetwork", "cardExpiry", "cardActive"]),
 };
 
-export function AssetForm({
+export function AssetForm(props: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  initial?: Asset;
+}) {
+  // Force a fresh form whenever the dialog opens with a different asset (or
+  // re-opens for "add new"). Avoids a setState-in-effect to reset values.
+  const formKey = props.open ? props.initial?.id ?? "new" : "closed";
+  return <AssetFormInner key={formKey} {...props} />;
+}
+
+function AssetFormInner({
   open,
   onOpenChange,
   initial,
@@ -95,20 +106,6 @@ export function AssetForm({
           currency: "EUR",
         }
   );
-
-  useEffect(() => {
-    if (open) {
-      setData(
-        initial
-          ? { ...initial }
-          : {
-              type: "etf",
-              source: "trade-republic",
-              currency: "EUR",
-            }
-      );
-    }
-  }, [open, initial]);
 
   const fields = TYPE_FIELDS[data.type as AssetType] ?? new Set();
   const has = (k: keyof FormData) => fields.has(k);

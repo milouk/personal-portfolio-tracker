@@ -543,6 +543,19 @@ async function main(): Promise<void> {
     anyUpdated = true;
   }
 
+  // ---------- documents (Υπηρεσίες) ----------
+  // Navigate the left sidebar's "Υπηρεσίες" section and try to find the user's
+  // signed documents (T-bill purchase receipts etc.). On first run we just
+  // capture screenshots so we can refine selectors based on what NBG actually
+  // shows. PDFs are downloaded into data/nbg/docs/ for offline parsing.
+  if (args.includes("--no-docs") === false) {
+    try {
+      await scrapeDocuments(page);
+    } catch (e) {
+      console.warn("[nbg] documents scrape failed:", e);
+    }
+  }
+
   // ---------- investments drill-down ----------
   // Click into the Επενδυτικά section (or whatever NBG calls it) and try to
   // discover per-position holdings. Match by ISIN to portfolio.json assets.
@@ -571,6 +584,187 @@ async function main(): Promise<void> {
   await ctx.close();
 }
 
+// ---------- safety: refuse any click that looks like a transaction action ----
+// This script is read-only by design. As an extra guard against ever
+// triggering a buy/sell, every click goes through `safeClick`, which inspects
+// the element's accessible name + nearby text and aborts if it matches any
+// transaction-related label.
+const DANGEROUS_CLICK_LABELS =
+  /(?:^|\b)(Αγορά|Αγοράζω|Πώληση|Πωλώ|Εκτέλεση|Επιβεβαίωση|Συμφωνώ|Πληρωμή|Μεταφορά|Έκδοση|Submit|Confirm|Buy|Sell|Pay|Transfer|Execute|Επιλογή)\b/i;
+
+async function safeClick(
+  locator: import("playwright").Locator,
+  context = "(unspecified)"
+): Promise<boolean> {
+  const text = (await locator.innerText().catch(() => "")).trim();
+  if (DANGEROUS_CLICK_LABELS.test(text)) {
+    console.error(
+      `[nbg] REFUSING click on "${text.slice(0, 60)}" (${context}) — matches transaction keyword.`
+    );
+    return false;
+  }
+  try {
+    await locator.click({ timeout: 5000 });
+    return true;
+  } catch (e) {
+    console.warn(`[nbg] click "${text.slice(0, 30)}" (${context}) failed:`, e);
+    return false;
+  }
+}
+
+// ---------- documents (Υπηρεσίες → Έγγραφα) ----------
+//
+// Goal: navigate to the documents/correspondence section in NBG i-bank, list
+// what's available, and download new PDFs into data/nbg/docs/ for offline
+// parsing (T-bill receipts → real face/purchase/maturity).
+//
+// Selectors: NBG i-bank's structure isn't fully predictable; this is a
+// best-effort exploration. Override via env if needed:
+//   NBG_SERVICES_LABEL    default: "Υπηρεσίες"
+//   NBG_DOCS_LABEL        default: matches "Έγγραφα" / "Documents" /
+//                                  "Εκτυπώσεις" / "Αρχείο"
+async function scrapeDocuments(page: Page): Promise<void> {
+  const docsDir = path.join(ROOT, "data", "nbg", "docs");
+  await ensureDir(docsDir);
+
+  const servicesLabel =
+    process.env.NBG_SERVICES_LABEL ?? "Υπηρεσίες";
+  const docsLabel =
+    process.env.NBG_DOCS_LABEL ?? "Έγγραφα|Documents|Εκτυπώσεις|Αρχείο|Παραστατικά";
+
+  console.log(`[nbg] looking for "${servicesLabel}" in the sidebar…`);
+
+  // Diagnostic: list every visible link/button so we can find the right one.
+  try {
+    const elements = await page.locator("a:visible, button:visible").all();
+    const interesting: { tag: string; text: string; href: string }[] = [];
+    for (const el of elements.slice(0, 200)) {
+      const text = (await el.innerText().catch(() => "")).trim().slice(0, 80);
+      if (!text) continue;
+      // Surface anything plausibly related to docs/services
+      const tag = String(
+        (await el.evaluate("e => e.tagName").catch(() => "?")) ?? "?"
+      );
+      const href = (await el.getAttribute("href").catch(() => "")) ?? "";
+      if (
+        /Υπηρεσίες|Έγγραφα|Παραστατικά|Εκτυπώσεις|Αρχείο|Document|Statement|Investment/i.test(
+          text
+        ) ||
+        /document|statement|invest|service/i.test(href)
+      ) {
+        interesting.push({ tag, text, href });
+      }
+    }
+    if (interesting.length > 0) {
+      console.log(`[nbg] candidate elements (${interesting.length}):`);
+      for (const e of interesting.slice(0, 25)) {
+        console.log(
+          `   ${e.tag.padEnd(8)} "${e.text}"${e.href ? ` → ${e.href.slice(0, 80)}` : ""}`
+        );
+      }
+    } else {
+      console.log("[nbg] no Υπηρεσίες/Documents-style elements found visible");
+    }
+  } catch {
+    /* keep going */
+  }
+
+  // Step 1 — try clicking Υπηρεσίες in the sidebar / nav.
+  const servicesCandidates = [
+    `nav >> text=/^${servicesLabel}$/`,
+    `aside >> text=/^${servicesLabel}$/`,
+    `text=/^${servicesLabel}$/`,
+    `a:has-text("${servicesLabel}")`,
+    `button:has-text("${servicesLabel}")`,
+    `[aria-label*="${servicesLabel}" i]`,
+  ];
+  let opened = false;
+  for (const sel of servicesCandidates) {
+    try {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 1500 })) {
+        await el.click({ timeout: 4000 });
+        opened = true;
+        await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1200);
+        await snap(page, "06-services");
+        break;
+      }
+    } catch {
+      /* keep trying */
+    }
+  }
+  if (!opened) {
+    console.log(
+      `[nbg] could not find "${servicesLabel}" in the sidebar — leaving documents alone. ` +
+        `Inspect 04-accounts-listed.png and set NBG_SERVICES_LABEL to the exact text.`
+    );
+    return;
+  }
+
+  // Step 2 — within Υπηρεσίες, click into the Documents sub-section.
+  const re = new RegExp(`^(${docsLabel})$`, "i");
+  const docsCandidates = [
+    page.getByRole("link", { name: re }),
+    page.getByRole("button", { name: re }),
+    page.locator(`a:has-text("${docsLabel.split("|")[0]}")`),
+  ];
+  let inDocs = false;
+  for (const cand of docsCandidates) {
+    try {
+      const el = cand.first();
+      if (await el.isVisible({ timeout: 1500 })) {
+        await el.click({ timeout: 4000 });
+        inDocs = true;
+        await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1500);
+        await snap(page, "07-documents");
+        break;
+      }
+    } catch {
+      /* keep trying */
+    }
+  }
+  if (!inDocs) {
+    console.log(
+      `[nbg] opened "${servicesLabel}" but couldn't find a documents subsection. ` +
+        `Inspect 06-services.png and set NBG_DOCS_LABEL to the right substring(s).`
+    );
+    return;
+  }
+
+  // Step 3 — list any PDF download links / rows on the documents page.
+  const links = await page
+    .locator('a[href$=".pdf"], a[href*="document"], a[href*="statement"]')
+    .all();
+  console.log(`[nbg] found ${links.length} candidate document link(s)`);
+  for (let i = 0; i < Math.min(links.length, 30); i++) {
+    const text = (await links[i].innerText().catch(() => "")).trim();
+    const href = (await links[i].getAttribute("href").catch(() => "")) ?? "";
+    console.log(`   ${i + 1}. "${text.slice(0, 80)}" → ${href.slice(0, 80)}`);
+  }
+
+  // Step 4 — try to download each PDF. We let the browser handle the request
+  // and capture the response body. Skip if Playwright can't intercept.
+  for (let i = 0; i < Math.min(links.length, 10); i++) {
+    try {
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 8000 }).catch(() => null),
+        links[i].click({ timeout: 4000 }).catch(() => undefined),
+      ]);
+      if (download) {
+        const suggested = download.suggestedFilename() || `doc-${i + 1}.pdf`;
+        const target = path.join(docsDir, suggested);
+        await download.saveAs(target);
+        console.log(`   ✓ saved ${suggested}`);
+      }
+    } catch (e) {
+      console.warn(`   ✗ download #${i + 1} failed:`, e);
+    }
+  }
+  console.log(`[nbg] documents scrape done — files in ${docsDir}`);
+}
+
 // ---------- investments drill-down ----------
 type InvestmentPosition = {
   isin?: string;
@@ -585,53 +779,254 @@ type InvestmentScrapeResult = {
 };
 
 async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
-  const sectionLabel =
-    process.env.NBG_INVESTMENTS_LABEL ?? "Επενδυτικά";
-  console.log(`[nbg] drilling into "${sectionLabel}" section…`);
+  // The dashboard's Επενδυτικά card links to a per-portfolio investments page
+  // whose URL pattern is #/investments/info/<portfolioId>. We discover it
+  // organically by finding any anchor on the dashboard with that href shape —
+  // works for any user without hardcoding the portfolio id.
+  console.log("[nbg] looking for an investments link on the dashboard…");
+  const startUrl = page.url();
 
-  // Try to click the section heading or the first link inside it. NBG renders
-  // the "Επενδυτικά" card as a heading + a "View all" / "Λεπτομέρειες" link.
-  // We try two strategies: click a sibling button, then fall back to the
-  // heading itself.
-  const candidates = [
-    `text=/^${sectionLabel}$/`,
-    `a:has-text("${sectionLabel}")`,
-    `button:has-text("${sectionLabel}")`,
-    `[aria-label*="${sectionLabel}" i]`,
-    `text=Λεπτομέρειες`,
-    `text=Προβολή`,
-  ];
+  const linkLocator = page.locator('a[href*="/investments/info/"]').first();
+  const fallbackLocator = page.locator('a[href*="/investments"]').first();
 
-  let clicked = false;
-  for (const sel of candidates) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 1500 })) {
-        await el.click({ timeout: 4000 });
-        clicked = true;
-        await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
-        await page.waitForTimeout(1500);
-        await snap(page, "05-investments-section");
-        break;
-      }
-    } catch {
-      /* keep trying */
-    }
-  }
-
-  if (!clicked) {
+  const candidate = (await linkLocator.count()) > 0 ? linkLocator : fallbackLocator;
+  if ((await candidate.count()) === 0) {
     return {
       positions: [],
       note:
-        "couldn't find a clickable Επενδυτικά element. Set NBG_INVESTMENTS_LABEL " +
-        "to the exact heading text or inspect 04-accounts-listed.png.",
+        "couldn't find an /investments/info/ link on the dashboard. " +
+        "NBG might render the card without a real anchor — inspect 04-accounts-listed.png.",
     };
   }
 
-  // Once on the investments page, dump body text and parse position rows.
-  // Each row typically has: position name, possibly an ISIN (12 chars),
-  // possibly a quantity, and a EUR amount. We pair rows + amounts heuristically.
-  await page.waitForTimeout(1500);
+  const href = await candidate.getAttribute("href").catch(() => null);
+  console.log(`[nbg] clicking investments link: ${href ?? "(no href)"}`);
+
+  // NBG renders a `loading-stage-container` overlay while the dashboard's
+  // widgets finish loading. Wait for it to go away before clicking.
+  await page
+    .locator(".loading-stage-container")
+    .waitFor({ state: "hidden", timeout: 15_000 })
+    .catch(() => undefined);
+
+  try {
+    await candidate.click({ timeout: 8000 });
+  } catch {
+    // Fall back to programmatic navigation using the discovered href.
+    if (href) {
+      console.log("[nbg] click intercepted, using direct href navigation");
+      const targetUrl = new URL(href, page.url()).toString();
+      await page.goto(targetUrl, { waitUntil: "load", timeout: 15_000 }).catch(() => undefined);
+    } else {
+      return { positions: [], note: "click intercepted and no href available" };
+    }
+  }
+
+  // SPA hash-based routing — wait for the URL to settle to /investments/.
+  await page
+    .waitForFunction(
+      (start) => location.href !== start && /\/investments\b/.test(location.href),
+      startUrl,
+      { timeout: 10_000 }
+    )
+    .catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(2500);
+
+  // We're on /investments (the portfolio list). The clickable element that
+  // drills into the breakdown is the portfolio CARD itself — NOT the bottom
+  // "Συναλλαγές Κινητών Αξιών" link (that opens a buy/sell modal).
+  //
+  // Strategy: discover the portfolio id organically from the page text
+  // (NBG renders it next to "Φιλική Ον/σία"), then navigate to the canonical
+  // detail URL #/investments/info/<id>#transferableSecurities. This is the
+  // same path the user follows by clicking the card.
+  await page
+    .locator(".loading-stage-container")
+    .waitFor({ state: "hidden", timeout: 8000 })
+    .catch(() => undefined);
+
+  const listText = await page.locator("body").innerText();
+  // Portfolio IDs are 6-8 digit numbers shown after "Φιλική Ον/σία" /
+  // "Φιλική Ονομασία". Take the first match.
+  const idMatch =
+    listText.match(/Φιλική\s+Ον[\/\s]?σ?ία[\s\S]{0,40}?(\d{6,8})/) ??
+    listText.match(/Φιλική\s+Ονομασία[\s\S]{0,40}?(\d{6,8})/);
+  const portfolioId = idMatch?.[1];
+  if (!portfolioId) {
+    return {
+      positions: [],
+      note: "couldn't discover portfolio id from list page (no Φιλική Ον/σία match)",
+    };
+  }
+  console.log(`[nbg] discovered portfolio id ${portfolioId}, drilling in`);
+
+  const detailUrl = `https://ebanking.nbg.gr/web/#/investments/info/${portfolioId}#transferableSecurities`;
+  await page.goto(detailUrl, { waitUntil: "load", timeout: 15_000 }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
+  await page
+    .getByText(/Παρακαλώ\s+περιμένετε/i)
+    .first()
+    .waitFor({ state: "hidden", timeout: 30_000 })
+    .catch(() => undefined);
+  await page.waitForTimeout(2500);
+  await snap(page, "05b-securities-loaded");
+  console.log(`[nbg] now at ${page.url().slice(0, 100)}`);
+
+  // The "Προϊόντα Χαρτοφυλακίου" tab shows a "Χρηματοπιστωτικά Μέσα" tile
+  // with the aggregate value. Clicking the tile expands the per-holding
+  // breakdown (ISIN + face + valuation).
+  const fiTile = page.getByText("Χρηματοπιστωτικά Μέσα", { exact: false });
+  const fiCount = await fiTile.count();
+  console.log(`[nbg] "Χρηματοπιστωτικά Μέσα" appears ${fiCount}× on the page`);
+  for (let i = 0; i < fiCount; i++) {
+    console.log(`[nbg] trying click #${i + 1}/${fiCount}`);
+    const ok = await safeClick(fiTile.nth(i), `Χρηματοπιστωτικά Μέσα #${i + 1}`);
+    if (!ok) continue;
+    await page.waitForTimeout(1500);
+    await page
+      .getByText(/Παρακαλώ\s+περιμένετε/i)
+      .first()
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(1500);
+    const body = await page.locator("body").innerText();
+    if (/GR\d{10}/.test(body)) {
+      console.log(`[nbg] click #${i + 1} expanded the breakdown`);
+      await snap(page, "05c-financial-instruments");
+      break;
+    }
+    // Belt-and-braces: if a transaction modal opened anyway (e.g. a wrapping
+    // anchor we couldn't see), dismiss it without ever clicking inside.
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await page.waitForTimeout(500);
+  }
+
+  await snap(page, "05-investments-detail");
+  console.log(`[nbg] now at ${page.url().slice(0, 100)}`);
+
+  // We're on /investments/info/<portfolioId>. Below the summary there's a
+  // "Προϊόντα Χαρτοφυλακίου" (Portfolio Products) section whose first tile is
+  // the portfolio card itself. Clicking that card drills into per-holding
+  // pages with the real ISIN / face value / maturity.
+  //
+  // We discover the tile by looking for a link whose href extends the current
+  // URL — i.e. /investments/info/<id>/<something>. That's a clickable holding.
+  await page.waitForTimeout(800);
+  const currentPath = (() => {
+    const m = page.url().match(/#\/investments\/info\/[^/?]+/);
+    return m ? m[0] : "#/investments/info";
+  })();
+  const productsHeading = page
+    .getByText(/Προϊόντα\s+Χαρτοφυλακίου/i)
+    .first();
+  const hasProducts = await productsHeading
+    .isVisible({ timeout: 3000 })
+    .catch(() => false);
+
+  {
+    console.log(
+      hasProducts
+        ? '[nbg] found "Προϊόντα Χαρτοφυλακίου" heading'
+        : '[nbg] heading not visible — falling back to URL-pattern tile detection'
+    );
+
+    // Find tiles by href pattern: any anchor whose href extends the current
+    // /investments/info/<id> path (i.e. a link to a per-holding sub-route).
+    const allLinks = await page.locator("a:visible").all();
+    const annotated = await Promise.all(
+      allLinks.map(async (l) => {
+        const t = (await l.innerText().catch(() => "")).trim();
+        const h = (await l.getAttribute("href").catch(() => "")) ?? "";
+        return { l, t, h };
+      })
+    );
+    // Tiles = anchors whose href contains the current portfolio path PLUS
+    // additional segments (sub-pages of this portfolio).
+    const portfolioPathRe = new RegExp(
+      currentPath.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "/"
+    );
+    const productTiles = annotated
+      .filter(
+        (x) =>
+          portfolioPathRe.test(x.h) ||
+          /\/securities\//.test(x.h) ||
+          /\/holdings?\//.test(x.h)
+      )
+      .map((x) => x.l);
+
+    console.log(`[nbg] ${productTiles.length} product tile(s) detected via URL pattern`);
+    for (const x of annotated.filter(
+      (a) =>
+        portfolioPathRe.test(a.h) ||
+        /\/securities\//.test(a.h) ||
+        /\/holdings?\//.test(a.h)
+    )) {
+      console.log(`   "${x.t.slice(0, 50)}" → ${x.h.slice(0, 80)}`);
+    }
+    const collected: InvestmentPosition[] = [];
+    const startedAt = page.url();
+
+    for (let i = 0; i < productTiles.length; i++) {
+      try {
+        await page
+          .locator(".loading-stage-container")
+          .waitFor({ state: "hidden", timeout: 8000 })
+          .catch(() => undefined);
+        await productTiles[i].click({ timeout: 5000 });
+        await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
+        await page.waitForTimeout(1500);
+        await snap(page, `05c-product-${i + 1}`);
+
+        const detailText = await page.locator("body").innerText();
+        const lines = detailText.split("\n").map((l) => l.trim()).filter(Boolean);
+        const isinM = detailText.match(/\b([A-Z]{2}[A-Z0-9]{9}\d)\b/);
+        const isin = isinM ? isinM[1] : undefined;
+
+        // Pick the largest EUR amount on the page as the current value.
+        const amounts = (detailText.match(/\d{1,3}(?:\.\d{3})*,\d{2}/g) ?? [])
+          .map((s) => parseAmount(s) ?? 0)
+          .sort((a, b) => b - a);
+        const value = amounts[0] ?? 0;
+
+        const name =
+          lines.find(
+            (l) =>
+              l.length > 4 &&
+              l.length < 80 &&
+              !/^[\d.,€\s]+$/.test(l) &&
+              !/^\d{6,}$/.test(l) &&
+              !/Συνολ|Διαθέσ|Κατηγορ|Επενδ|Κύριος/.test(l)
+          ) ?? isin ?? "";
+
+        if (isin || value > 0) {
+          collected.push({ isin, name, value });
+          console.log(
+            `   ✓ tile ${i + 1}: ${isin ?? "(no isin)"} · ${name.slice(0, 50)} · €${value.toFixed(2)}`
+          );
+        } else {
+          console.log(`   ? tile ${i + 1}: nothing useful — first 30 lines:`);
+          for (const l of lines.slice(0, 30)) console.log(`     "${l}"`);
+        }
+      } catch (e) {
+        console.warn(`   ✗ tile ${i + 1} drill failed:`, e);
+      }
+      // Back to portfolio info for the next tile.
+      await page.goBack({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => undefined);
+      await page.waitForTimeout(800);
+      // If goBack didn't restore the right URL, navigate via known link.
+      if (!page.url().includes(startedAt.split("#")[1] ?? "")) {
+        await page.goto(startedAt, { waitUntil: "load" }).catch(() => undefined);
+        await page.waitForTimeout(800);
+      }
+    }
+
+    if (collected.length > 0) return { positions: collected };
+  }
+
+  // Parse position rows. Each holding shows up with: name, ISIN (12 chars),
+  // quantity, current value, and (for T-bills) maturity / yield.
   const body = await page.locator("body").innerText();
   const lines = body.split("\n").map((l) => l.trim()).filter(Boolean);
 
@@ -643,19 +1038,23 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
     const isinMatch = lines[i].match(reIsin);
     if (!isinMatch) continue;
     const isin = isinMatch[1];
-    // Look ahead up to 5 lines for an amount.
-    const window = lines.slice(i, Math.min(i + 6, lines.length)).join(" ");
+    const window = lines.slice(i, Math.min(i + 8, lines.length)).join(" ");
     const amtMatch = window.match(reAmount);
     if (!amtMatch) continue;
     const value = parseAmount(amtMatch[0]);
     if (value === null) continue;
-    // Use the first non-ISIN line near it as the name. Prefer line BEFORE the
-    // ISIN (NBG puts security name on the previous row).
-    const candidates = [lines[i - 1], lines[i - 2], lines[i + 1]]
+    const nameCandidates = [lines[i - 1], lines[i - 2], lines[i + 1]]
       .map((s) => (s ?? "").trim())
       .filter((s) => s && !reIsin.test(s) && !reAmount.test(s) && s.length > 2);
-    const name = candidates[0] ?? isin;
+    const name = nameCandidates[0] ?? isin;
     positions.push({ isin, name, value });
+  }
+
+  // Diagnostic: if nothing matches, dump first 60 lines so we can see exactly
+  // what NBG renders on the investments-info page.
+  if (positions.length === 0) {
+    console.log("[nbg] no ISIN-shaped rows on the investments page. First 60 lines:");
+    for (const line of lines.slice(0, 60)) console.log(`   "${line}"`);
   }
 
   return { positions };

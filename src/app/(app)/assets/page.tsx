@@ -17,5 +17,5 @@ export default async function AssetsPage() {
   const valuations = portfolio.assets.map((a) =>
     valueAsset(a, prices[a.id], fx, { ecbDepositRate: ecb.rate })
   );
-  return <AssetsView valuations={valuations} fx={fx} />;
+  return <AssetsView valuations={valuations} />;
 }

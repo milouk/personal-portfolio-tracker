@@ -11,6 +11,7 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import { accessSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +29,7 @@ function pyExecutable(): string {
   if (process.env.TR_PYTHON) return process.env.TR_PYTHON;
   const venvPy = path.join(ROOT, ".venv", "bin", "python3");
   try {
-    require("node:fs").accessSync(venvPy);
+    accessSync(venvPy);
     return venvPy;
   } catch {
     return "python3";

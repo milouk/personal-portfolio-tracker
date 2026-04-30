@@ -1,6 +1,5 @@
 import "server-only";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { nanoid } from "nanoid";
 import { Asset, Portfolio, PortfolioEvent } from "../types";
 import { DATA_DIR, EVENTS_FILE, PORTFOLIO_FILE } from "./paths";
@@ -127,18 +126,3 @@ export async function deleteAsset(id: string): Promise<boolean> {
   return true;
 }
 
-export async function bulkReplace(assets: Asset[]): Promise<Portfolio> {
-  const portfolio = await readPortfolio();
-  portfolio.assets = assets;
-  await writePortfolio(portfolio);
-  return portfolio;
-}
-
-export function dataDir() {
-  return DATA_DIR;
-}
-export function ensureDataDir() {
-  return fs.mkdir(DATA_DIR, { recursive: true }).then(() =>
-    fs.mkdir(path.join(DATA_DIR, "imports"), { recursive: true })
-  );
-}

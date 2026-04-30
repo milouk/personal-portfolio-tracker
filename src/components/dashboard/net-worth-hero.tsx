@@ -12,7 +12,6 @@ export function NetWorthHero({
   estAnnualYieldEur,
   totalUsd,
   fxRate,
-  fxAt,
   ecb,
 }: {
   totalEur: number;
@@ -21,7 +20,6 @@ export function NetWorthHero({
   estAnnualYieldEur: number;
   totalUsd: number;
   fxRate: number;
-  fxAt: string;
   ecb?: EcbRate;
 }) {
   const positive = gainEur >= 0;
@@ -52,7 +50,7 @@ export function NetWorthHero({
           </motion.div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
             <span className="font-numeric">
-              ≈ {formatCurrency(totalUsd, "USD", { decimals: 0 })}
+              ≈ {formatCurrency(totalUsd, "USD", { decimals: 2 })}
             </span>
             <span className="text-border">·</span>
             <span>EUR/USD {(1 / fxRate).toFixed(4)}</span>
@@ -74,7 +72,7 @@ export function NetWorthHero({
           <Stat
             label="Unrealized P/L"
             value={signed(gainEur, (v) =>
-              formatCurrency(v, "EUR", { decimals: 0 })
+              formatCurrency(v, "EUR", { decimals: 2 })
             )}
             sub={signed(gainPct, (v) => formatPercent(v))}
             tone={positive ? "gain" : "loss"}
@@ -82,7 +80,7 @@ export function NetWorthHero({
           />
           <Stat
             label="Est. annual yield"
-            value={formatCurrency(estAnnualYieldEur, "EUR", { decimals: 0 })}
+            value={formatCurrency(estAnnualYieldEur, "EUR", { decimals: 2 })}
             sub={
               totalEur > 0
                 ? `${formatPercent(estAnnualYieldEur / totalEur)} yield`

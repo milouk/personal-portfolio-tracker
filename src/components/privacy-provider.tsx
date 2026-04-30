@@ -1,5 +1,11 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useSyncExternalStore,
+} from "react";
 
 type PrivacyContextValue = {
   hidden: boolean;
@@ -15,35 +21,47 @@ const PrivacyContext = createContext<PrivacyContextValue>({
 
 const STORAGE_KEY = "portfolio.privacy.hidden";
 
+const listeners = new Set<() => void>();
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+function readSnapshot(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(STORAGE_KEY) === "1";
+}
+function readServerSnapshot(): boolean {
+  return false;
+}
+function writeHidden(next: boolean) {
+  localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+  document.documentElement.dataset.private = next ? "1" : "0";
+  for (const l of listeners) l();
+}
+
 export function PrivacyProvider({ children }: { children: React.ReactNode }) {
-  const [hidden, setHidden] = useState(false);
+  const hidden = useSyncExternalStore(subscribe, readSnapshot, readServerSnapshot);
 
-  // Read persisted preference on mount; mirror to <html data-private="1|0">.
+  // Mirror to <html data-private> whenever the snapshot changes (e.g. after
+  // an external update like another tab toggling localStorage).
   useEffect(() => {
-    const v = localStorage.getItem(STORAGE_KEY) === "1";
-    setHidden(v);
-    document.documentElement.dataset.private = v ? "1" : "0";
-  }, []);
+    document.documentElement.dataset.private = hidden ? "1" : "0";
+  }, [hidden]);
 
-  const set = useCallback((next: boolean) => {
-    setHidden(next);
-    localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-    document.documentElement.dataset.private = next ? "1" : "0";
-  }, []);
-
-  const toggle = useCallback(() => set(!hidden), [hidden, set]);
+  const set = useCallback((next: boolean) => writeHidden(next), []);
+  const toggle = useCallback(() => writeHidden(!readSnapshot()), []);
 
   // Allow toggling with `Cmd/Ctrl + .` for quick screenshots.
   useEffect(() => {
     function handle(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === ".") {
         e.preventDefault();
-        set(!hidden);
+        toggle();
       }
     }
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [hidden, set]);
+  }, [toggle]);
 
   return (
     <PrivacyContext.Provider value={{ hidden, toggle, set }}>

@@ -3,7 +3,7 @@ import { Eye, EyeOff, Moon, Sun, Wallet, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { usePrivacy } from "@/components/privacy-provider";
 import { SyncController } from "@/components/sync/sync-controller";
@@ -15,6 +15,12 @@ const NAV = [
   { href: "/history", label: "History" },
 ];
 
+// Detect hydration so the icon swap (Sun/Moon, Eye/EyeOff) doesn't mismatch
+// on first render — server has no idea what the client's theme/privacy is.
+const subscribeNoop = () => () => {};
+const useMounted = () =>
+  useSyncExternalStore(subscribeNoop, () => true, () => false);
+
 export function Header({
   onAddAsset,
 }: {
@@ -23,8 +29,7 @@ export function Header({
   const pathname = usePathname();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { hidden, toggle: togglePrivacy } = usePrivacy();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   const isDark = mounted ? (resolvedTheme ?? theme) === "dark" : true;
   const isDemo = process.env.NEXT_PUBLIC_DEMO === "1";
 

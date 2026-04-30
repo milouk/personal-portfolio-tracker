@@ -28,7 +28,6 @@ const PAGES_WITH_DYNAMIC = [
 const ACTIONS_FILE = path.join(ROOT, "src", "lib", "actions.ts");
 const ACTIONS_STUB = `// Auto-generated stub during demo build — server actions can't ship with output:export.
 // The original file is restored after the build completes.
-import type { AssetSource, AssetType, Currency } from "./types";
 export async function createAssetAction(_input: unknown) {
   throw new Error("Demo mode is read-only.");
 }
@@ -38,7 +37,6 @@ export async function updateAssetAction(_id: string, _patch: unknown) {
 export async function deleteAssetAction(_id: string) {
   throw new Error("Demo mode is read-only.");
 }
-export type { AssetSource, AssetType, Currency };
 `;
 
 function patchPages(): Map<string, string> {

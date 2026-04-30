@@ -30,7 +30,7 @@ export async function getEurUsdRate(force = false): Promise<FxRate> {
     };
     await writeFxCache({ eurUsd: fx });
     return fx;
-  } catch (err) {
+  } catch {
     if (cache.eurUsd) return cache.eurUsd;
     // last-resort fallback so the UI never explodes
     return {
@@ -41,5 +41,3 @@ export async function getEurUsdRate(force = false): Promise<FxRate> {
     };
   }
 }
-
-export { usdToEur, eurToUsd } from "../fx-utils";

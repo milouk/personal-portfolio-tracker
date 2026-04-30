@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { AllocationDonut } from "@/components/charts/allocation-donut";
 import { SourceCard } from "./source-card";
 import { BondsLadder } from "./bonds-ladder";
 import { TbillsWidget } from "./tbills-widget";
+import { CalendarWidget } from "./calendar-widget";
 import { AssetForm } from "@/components/assets/asset-form";
 import { SOURCE_COLOR, TYPE_COLOR } from "@/lib/colors";
 import { eurToUsd } from "@/lib/fx-utils";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/types";
 import type { PortfolioTotals } from "@/lib/calc/valuation";
 import type { EcbRate } from "@/lib/prices/ecb";
+import type { CalendarEvent } from "@/lib/calendar";
 
 export function Dashboard({
   totals,
@@ -29,6 +31,7 @@ export function Dashboard({
   fx,
   ecb,
   assets,
+  calendar,
 }: {
   totals: PortfolioTotals;
   grouped: { source: AssetSource; valuations: AssetValuation[] }[];
@@ -36,28 +39,54 @@ export function Dashboard({
   fx: FxRate;
   ecb: EcbRate;
   assets: Asset[];
+  calendar: CalendarEvent[];
 }) {
   const [addOpen, setAddOpen] = useState(false);
 
   const totalUsd = eurToUsd(totals.totalEur, fx.rate);
 
-  const sourceSlices = Object.entries(totals.bySource)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => ({
-      key: k,
-      label: SOURCE_LABEL[k as AssetSource],
-      value: v,
-      color: SOURCE_COLOR[k as AssetSource],
-    }));
+  const sourceSlices = useMemo(
+    () =>
+      Object.entries(totals.bySource)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => ({
+          key: k,
+          label: SOURCE_LABEL[k as AssetSource],
+          value: v,
+          color: SOURCE_COLOR[k as AssetSource],
+        })),
+    [totals.bySource]
+  );
 
-  const typeSlices = Object.entries(totals.byType)
-    .filter(([, v]) => v > 0)
-    .map(([k, v]) => ({
-      key: k,
-      label: ASSET_TYPE_LABEL[k as keyof typeof ASSET_TYPE_LABEL] ?? k,
-      value: v,
-      color: TYPE_COLOR[k as keyof typeof TYPE_COLOR],
-    }));
+  const typeSlices = useMemo(
+    () =>
+      Object.entries(totals.byType)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => ({
+          key: k,
+          label: ASSET_TYPE_LABEL[k as keyof typeof ASSET_TYPE_LABEL] ?? k,
+          value: v,
+          color: TYPE_COLOR[k as keyof typeof TYPE_COLOR],
+        })),
+    [totals.byType]
+  );
+
+  // Live default for the T-bill profit calculator: how much liquid cash you
+  // could actually park in T-bills today. Rounded to the nearest €100 so the
+  // input field doesn't show fractional cents.
+  const liquidEur = useMemo(
+    () =>
+      valuations
+        .filter(
+          (v) =>
+            v.asset.type === "cash" ||
+            v.asset.type === "deposit" ||
+            v.asset.type === "interest_account"
+        )
+        .reduce((acc, v) => acc + v.eurValue, 0),
+    [valuations]
+  );
+  const tbillCalcDefault = Math.max(0, Math.round(liquidEur / 100) * 100);
 
   const empty = assets.length === 0;
 
@@ -77,7 +106,6 @@ export function Dashboard({
               gainPct={totals.totalGainPct}
               estAnnualYieldEur={totals.estAnnualYieldEur}
               fxRate={fx.rate}
-              fxAt={fx.fetchedAt}
               ecb={ecb}
             />
 
@@ -94,14 +122,11 @@ export function Dashboard({
               />
             </div>
 
+            <CalendarWidget events={calendar} />
+
             <BondsLadder valuations={valuations} />
 
-            <TbillsWidget
-              defaultAmount={Math.max(
-                10000,
-                Math.round(totals.bySource["trade-republic"] * 0.2 || 10000)
-              )}
-            />
+            <TbillsWidget defaultAmount={tbillCalcDefault} />
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">

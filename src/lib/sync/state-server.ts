@@ -9,7 +9,7 @@ const SYNC_DIR = path.join(ROOT, "data", "sync");
 const STATE_FILE = path.join(SYNC_DIR, "state.json");
 
 export type SyncSource = "tr" | "nbg";
-export type SourceStatus =
+type SourceStatus =
   | "idle"
   | "running"
   | "needs_otp"
@@ -17,14 +17,14 @@ export type SourceStatus =
   | "success"
   | "error";
 
-export type SourceState = {
+type SourceState = {
   status: SourceStatus;
   message?: string;
   startedAt?: string;
   finishedAt?: string;
   lastError?: string;
 };
-export type SyncState = {
+type SyncState = {
   tr: SourceState;
   nbg: SourceState;
 };
@@ -47,8 +47,3 @@ export async function writeOtp(source: SyncSource, code: string): Promise<void> 
   await fs.mkdir(SYNC_DIR, { recursive: true });
   await fs.writeFile(path.join(SYNC_DIR, `otp-${source}.txt`), code, "utf8");
 }
-
-export const PATHS = {
-  syncDir: SYNC_DIR,
-  stateFile: STATE_FILE,
-};

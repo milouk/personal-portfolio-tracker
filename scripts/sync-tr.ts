@@ -16,6 +16,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import { accessSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { notify } from "./lib/notify";
@@ -39,6 +40,7 @@ type TrPosition = {
   quantity: number;
   value: number;
   averagePrice: number | null;
+  livePrice?: number | null;
 };
 type TrCash = { currency: string; amount: number };
 type TrFetchResult =
@@ -93,7 +95,7 @@ function findPytrHelper(): string {
   if (process.env.TR_PYTHON) return process.env.TR_PYTHON;
   const venvPy = path.join(ROOT, ".venv", "bin", "python3");
   try {
-    require("node:fs").accessSync(venvPy);
+    accessSync(venvPy);
     return venvPy;
   } catch {
     /* fall through */
@@ -204,7 +206,7 @@ async function applyUpdates(
       costBasis: asset.costBasis,
       marketValueOverride: asset.marketValueOverride,
     };
-    let changedKeys: string[] = [];
+    const changedKeys: string[] = [];
 
     // pytr's compactPortfolio returns quantity + average buy-in price, but
     // not current value (value is 0 in compact view). We sync the structural
@@ -223,10 +225,16 @@ async function applyUpdates(
           changedKeys.push("costBasis");
         }
       }
+      // Live price from TR's ticker stream — store as manualPrice so the
+      // dashboard's valuation engine uses it directly (qty * manualPrice).
+      if (typeof p.livePrice === "number" && p.livePrice > 0) {
+        const live = Number(p.livePrice.toFixed(6));
+        if (asset.manualPrice !== live) {
+          asset.manualPrice = live;
+          changedKeys.push("manualPrice");
+        }
+      }
     } else if (asset.type === "bond" || asset.type === "tbill") {
-      // Bonds: track quantity and cost basis. Don't touch marketValueOverride —
-      // pytr compactPortfolio doesn't have a usable current value, and our
-      // existing engine accrues value over time from purchasePrice → faceValue.
       if (p.quantity > 0 && asset.quantity !== p.quantity) {
         asset.quantity = p.quantity;
         changedKeys.push("quantity");
@@ -236,6 +244,16 @@ async function applyUpdates(
         if (asset.costBasis !== totalCost) {
           asset.costBasis = totalCost;
           changedKeys.push("costBasis");
+        }
+      }
+      // For TR-managed bond/money-market products (e.g. Dec 2026 Term ETF),
+      // pytr's ticker gives us the live mark-to-market value. Use it as
+      // marketValueOverride so the dashboard reflects today's price.
+      if (typeof p.value === "number" && p.value > 0) {
+        const live = Number(p.value.toFixed(2));
+        if (asset.marketValueOverride !== live) {
+          asset.marketValueOverride = live;
+          changedKeys.push("marketValueOverride");
         }
       }
     }
@@ -322,13 +340,13 @@ async function main() {
       finishedAt: new Date().toISOString(),
       lastError: result.error.message,
       message: needsLogin
-        ? "Session expired — run `npm run sync:tr:setup` to re-auth"
+        ? "Session expired — click Reconnect to re-authenticate"
         : result.error.message,
     });
     if (needsLogin) {
       await alert(
         "Trade Republic — re-auth needed",
-        "Your pytr session has expired. Run `npm run sync:tr:setup` to refresh.",
+        "Open the dashboard and click Reconnect TR. You'll get an SMS/push, paste the code in the OTP modal.",
         "high"
       );
     } else {

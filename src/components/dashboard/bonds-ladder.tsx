@@ -23,6 +23,25 @@ export function BondsLadder({ valuations }: { valuations: AssetValuation[] }) {
     0
   );
 
+  // T-bill aggregate (cost / profit-at-maturity / blended period yield).
+  // Capital-weighted: blendedYield = Σ(face - purchase) / Σ purchase.
+  const tbillRows = bonds.filter(
+    (b) =>
+      b.asset.type === "tbill" &&
+      typeof b.asset.faceValue === "number" &&
+      typeof b.asset.purchasePrice === "number"
+  );
+  const totalCost = tbillRows.reduce(
+    (acc, b) => acc + (b.asset.purchasePrice ?? 0),
+    0
+  );
+  const totalFace = tbillRows.reduce(
+    (acc, b) => acc + (b.asset.faceValue ?? 0),
+    0
+  );
+  const totalDiscount = totalFace - totalCost;
+  const blendedPeriodYield = totalCost > 0 ? totalDiscount / totalCost : 0;
+
   return (
     <section className="rounded-2xl border border-border/60 bg-card/40 p-5">
       <div className="mb-4 flex items-center justify-between">
@@ -34,7 +53,7 @@ export function BondsLadder({ valuations }: { valuations: AssetValuation[] }) {
           <div className="text-xs text-muted-foreground">
             Coupon income / yr ·{" "}
             <span className="font-numeric text-foreground">
-              {formatCurrency(totalIncome, "EUR", { decimals: 0 })}
+              {formatCurrency(totalIncome, "EUR", { decimals: 2 })}
             </span>
           </div>
         )}
@@ -94,7 +113,7 @@ export function BondsLadder({ valuations }: { valuations: AssetValuation[] }) {
 
               <div className="text-right">
                 <div className="font-numeric text-sm tabular-nums">
-                  {formatCurrency(b.eurValue, "EUR", { decimals: 0 })}
+                  {formatCurrency(b.eurValue, "EUR", { decimals: 2 })}
                 </div>
                 <div
                   className={cn(
@@ -115,6 +134,60 @@ export function BondsLadder({ valuations }: { valuations: AssetValuation[] }) {
           );
         })}
       </ul>
+
+      {tbillRows.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border/40 pt-3 sm:grid-cols-4">
+          <Stat
+            label="Cost basis"
+            value={formatCurrency(totalCost, "EUR", { decimals: 2 })}
+          />
+          <Stat
+            label="Face at maturity"
+            value={formatCurrency(totalFace, "EUR", { decimals: 2 })}
+          />
+          <Stat
+            label="Profit (locked)"
+            value={`+${formatCurrency(totalDiscount, "EUR", { decimals: 2 })}`}
+            tone="gain"
+          />
+          <Stat
+            label="Blended yield · period"
+            value={formatPercent(blendedPeriodYield, 3)}
+            tone="gain"
+            sub="net of fees · tax-free"
+          />
+        </div>
+      )}
     </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "gain" | "loss";
+}) {
+  const toneCls =
+    tone === "gain"
+      ? "text-[color:var(--gain)]"
+      : tone === "loss"
+        ? "text-[color:var(--loss)]"
+        : "text-foreground";
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div className={cn("font-numeric text-base font-medium tabular-nums", toneCls)}>
+        {value}
+      </div>
+      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
+    </div>
   );
 }

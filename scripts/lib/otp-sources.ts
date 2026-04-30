@@ -70,36 +70,37 @@ async function webhookOtpListener(timeoutMs: number): Promise<string | null> {
   const host = process.env.NBG_OTP_HOST ?? "0.0.0.0";
 
   return new Promise<string | null>((resolve) => {
-    let server: Server | undefined;
-    let timer: NodeJS.Timeout | undefined;
-    const finish = (code: string | null) => {
-      if (timer) clearTimeout(timer);
-      if (server) server.close();
-      resolve(code);
-    };
-
-    server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405;
-        res.end("POST only\n");
-        return;
-      }
-      try {
-        const body = await readBody(req);
-        const code = parseCode(body, req.headers["content-type"]);
-        if (!code) {
-          res.statusCode = 400;
-          res.end("no 4-8 digit code in body\n");
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    const server: Server = createServer(
+      async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("POST only\n");
           return;
         }
-        res.statusCode = 200;
-        res.end(`accepted ${code}\n`);
-        finish(code);
-      } catch (e) {
-        res.statusCode = 500;
-        res.end(String(e instanceof Error ? e.message : e));
+        try {
+          const body = await readBody(req);
+          const code = parseCode(body, req.headers["content-type"]);
+          if (!code) {
+            res.statusCode = 400;
+            res.end("no 4-8 digit code in body\n");
+            return;
+          }
+          res.statusCode = 200;
+          res.end(`accepted ${code}\n`);
+          finish(code);
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(String(e instanceof Error ? e.message : e));
+        }
       }
-    });
+    );
+
+    const finish = (code: string | null) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      server.close();
+      resolve(code);
+    };
 
     server.on("error", (err) => {
       console.warn(`[otp-webhook] listen error: ${err.message}`);
@@ -113,7 +114,7 @@ async function webhookOtpListener(timeoutMs: number): Promise<string | null> {
       );
     });
 
-    timer = setTimeout(() => finish(null), timeoutMs);
+    timeoutHandle = setTimeout(() => finish(null), timeoutMs);
   });
 }
 

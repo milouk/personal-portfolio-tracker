@@ -8,7 +8,7 @@ import {
   updateAsset,
 } from "./storage/portfolio";
 import { IS_DEMO } from "./storage/paths";
-import type { Asset, AssetSource, AssetType, Currency } from "./types";
+import type { Asset } from "./types";
 
 function refuseInDemo() {
   if (IS_DEMO) {
@@ -100,5 +100,3 @@ export async function deleteAssetAction(id: string) {
   revalidatePath("/", "layout");
   return ok;
 }
-
-export type { AssetSource, AssetType, Currency };

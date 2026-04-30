@@ -89,7 +89,7 @@ export function otpFilePath(source: SyncSource): string {
 export async function waitForQueuedOtp(
   source: SyncSource,
   timeoutMs: number,
-  pollMs = 1500
+  pollMs = 250
 ): Promise<string | null> {
   await ensureDir();
   const file = otpFilePath(source);
@@ -98,15 +98,18 @@ export async function waitForQueuedOtp(
     try {
       const raw = (await fs.readFile(file, "utf8")).trim();
       // Expect 4-8 digit code; tolerate JSON wrapper or plain text.
-      let code: string | null = null;
+      // Note: a bare digit string like "1234" is valid JSON (a number) so we
+      // try string/object shapes first and ALWAYS fall back to the raw text.
+      let candidate: string = raw;
       try {
         const parsed = JSON.parse(raw);
-        if (typeof parsed === "string") code = parsed;
-        else if (parsed && typeof parsed.code === "string") code = parsed.code;
+        if (typeof parsed === "string") candidate = parsed;
+        else if (parsed && typeof parsed.code === "string") candidate = parsed.code;
+        // numbers/other shapes → keep raw
       } catch {
-        code = raw;
+        /* not JSON, raw is fine */
       }
-      const m = (code ?? "").match(/\b(\d{4,8})\b/);
+      const m = candidate.match(/\b(\d{4,8})\b/);
       // Always delete the file so a stale OTP doesn't satisfy a future request.
       await fs.unlink(file).catch(() => undefined);
       if (m) return m[1];

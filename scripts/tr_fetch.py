@@ -123,12 +123,9 @@ async def fetch() -> dict:
             _log("recv timeout, retrying…")
             continue
 
-        # pytr.recv() returns (subscription_id, subscription_dict, payload)
-        # where subscription_dict is the dict we passed to subscribe(), e.g.
-        #   {"type": "compactPortfolio"} or {"type": "cash"}
         sub_id, sub, msg = recv_result
         sub_type = sub.get("type") if isinstance(sub, dict) else str(sub)
-        _log(f"  recv: type={sub_type}  msg keys={list(msg.keys()) if isinstance(msg, dict) else type(msg).__name__}")
+        _log(f"  recv: type={sub_type}")
 
         if sub_type == "compactPortfolio":
             for p in (msg.get("positions") or []):
@@ -143,12 +140,12 @@ async def fetch() -> dict:
                             if p.get("averageBuyIn") not in (None, "", 0)
                             else None
                         ),
+                        "livePrice": None,
                     }
                 )
             got_portfolio = True
 
         elif sub_type == "cash":
-            # pytr returns a list of currency dicts
             entries = msg if isinstance(msg, list) else (msg.get("cash") or [])
             for c in entries:
                 cash.append(
@@ -158,6 +155,66 @@ async def fetch() -> dict:
                     }
                 )
             got_cash = True
+
+    # ---- live prices via per-ISIN ticker subscriptions ----
+    # TR exposes a "ticker" subscription that streams bid/ask for an instrument
+    # on a specific exchange. LSX (Lang & Schwarz) is the default retail venue
+    # and is reliable for every TR-listed instrument.
+    if positions:
+        _log("subscribing to ticker streams for live prices…")
+        sub_ids: dict[int, dict] = {}
+        for p in positions:
+            isin = p.get("isin")
+            if not isin:
+                continue
+            sub = {"type": "ticker", "id": f"{isin}.LSX"}
+            try:
+                sid = await api.subscribe(sub)
+                sub_ids[sid] = p
+            except Exception as e:
+                _log(f"  ticker subscribe failed for {isin}: {e}")
+                continue
+
+        # Wait for one tick per subscription (or timeout). The ticker stream
+        # is push-based — first message has the latest bid/ask; we don't need
+        # to keep the subscription alive after that.
+        ticker_deadline = asyncio.get_event_loop().time() + 15
+        unresolved = set(sub_ids.keys())
+        while unresolved and asyncio.get_event_loop().time() < ticker_deadline:
+            try:
+                recv_result = await asyncio.wait_for(api.recv(), timeout=4)
+            except asyncio.TimeoutError:
+                continue
+            sid, sub, msg = recv_result
+            if sid not in unresolved:
+                continue
+            position = sub_ids[sid]
+            # message shape: {"bid": {"price": "..."}, "ask": {"price": "..."},
+            #                "last": {"price": "..."}, ...}
+            def _pick_price(m: dict) -> float | None:
+                for key in ("last", "bid", "ask"):
+                    v = m.get(key)
+                    if isinstance(v, dict) and v.get("price"):
+                        try:
+                            return float(v["price"])
+                        except (TypeError, ValueError):
+                            continue
+                return None
+            price = _pick_price(msg) if isinstance(msg, dict) else None
+            if price is not None:
+                position["livePrice"] = price
+                qty = position.get("quantity") or 0
+                if qty:
+                    position["value"] = qty * price
+            unresolved.discard(sid)
+
+        # Unsubscribe to be polite.
+        for sid in list(sub_ids.keys()):
+            try:
+                await api.unsubscribe(sid)
+            except Exception:
+                pass
+        _log(f"  resolved live prices for {len(sub_ids) - len(unresolved)}/{len(sub_ids)} positions")
 
     try:
         await api.close()

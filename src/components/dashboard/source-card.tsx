@@ -88,7 +88,7 @@ export function SourceCard({
         </div>
         <div className="text-right">
           <div className="font-numeric text-lg font-medium tabular-nums">
-            {formatCurrency(subtotal, "EUR", { decimals: 0 })}
+            {formatCurrency(subtotal, "EUR", { decimals: 2 })}
           </div>
           {subCost > 0 && (
             <div
@@ -100,7 +100,7 @@ export function SourceCard({
               )}
             >
               {signed(subGain, (v) =>
-                formatCurrency(v, "EUR", { decimals: 0 })
+                formatCurrency(v, "EUR", { decimals: 2 })
               )}{" "}
               · {signed(gainPct, (v) => formatPercent(v))}
             </div>
@@ -134,6 +134,127 @@ export function SourceCard({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function AssetRow({ v }: { v: AssetValuation }) {
+  const a = v.asset;
+  if (a.type === "card") return <CardRow asset={a} />;
+  const isBondLike = a.type === "tbill" || a.type === "bond";
+  const positive = (v.eurGain ?? 0) >= 0;
+  const showFx = a.currency !== "EUR";
+
+  // T-bill / bond specific surface: face value at maturity, pre-received
+  // interest (face - purchase), days remaining.
+  const face = a.faceValue;
+  const purchase = a.purchasePrice;
+  const discount =
+    face !== undefined && purchase !== undefined ? face - purchase : undefined;
+
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-1.5 hover:bg-secondary/40">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium">{a.name}</span>
+          {a.ticker && (
+            <span className="font-numeric text-[10px] uppercase tracking-wider text-muted-foreground">
+              {a.ticker}
+            </span>
+          )}
+          {a.isin && !a.ticker && (
+            <span className="font-numeric text-[10px] tabular-nums text-muted-foreground">
+              {a.isin}
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {a.quantity !== undefined && a.quantity > 0 && !isBondLike && (
+            <span className="font-numeric">
+              {a.quantity} ×{" "}
+              {v.lastPrice
+                ? formatCurrency(v.lastPrice, a.currency, { decimals: 4 })
+                : "—"}
+            </span>
+          )}
+          {a.maturityDate && (
+            <span>
+              matures {new Date(a.maturityDate).toLocaleDateString("en-IE")}
+              {v.daysToMaturity !== undefined && (
+                <span className="ml-1 text-foreground/70">
+                  ({v.daysToMaturity}d)
+                </span>
+              )}
+            </span>
+          )}
+          {v.resolvedRate !== undefined && (
+            <span className="inline-flex items-center gap-1">
+              {formatPercent(v.resolvedRate, 2)} APY
+              {v.resolvedRateLabel === "ECB DFR" && (
+                <span className="rounded border border-border px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
+                  live · ECB
+                </span>
+              )}
+            </span>
+          )}
+          {v.ytm !== undefined && (
+            <span>YTM {formatPercent(v.ytm, 2)}</span>
+          )}
+          {a.iban && (
+            <span
+              className="font-numeric text-[10px] tabular-nums"
+              data-blur-when-private
+              title={a.iban}
+            >
+              {maskIban(a.iban)}
+            </span>
+          )}
+        </div>
+        {/* Bond/T-bill: show purchase → maturity arc with pre-received interest */}
+        {isBondLike && face !== undefined && (
+          <div className="mt-1 flex items-center gap-1.5 text-[11px] font-numeric tabular-nums">
+            {purchase !== undefined && (
+              <>
+                <span className="text-muted-foreground">paid</span>
+                <span>{formatCurrency(purchase, a.currency, { decimals: 2 })}</span>
+                <span className="text-border">→</span>
+              </>
+            )}
+            <span className="text-muted-foreground">face</span>
+            <span>{formatCurrency(face, a.currency, { decimals: 2 })}</span>
+            {discount !== undefined && discount !== 0 && (
+              <span className="text-[color:var(--gain)]">
+                +{formatCurrency(discount, a.currency, { decimals: 2 })}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="text-right">
+        <div className="font-numeric text-sm tabular-nums">
+          {formatCurrency(v.eurValue, "EUR", { decimals: 2 })}
+        </div>
+        <div className="font-numeric text-[11px] tabular-nums text-muted-foreground">
+          {showFx
+            ? `${formatCurrency(v.nativeValue, a.currency, { decimals: 2 })}`
+            : v.eurGain !== undefined
+              ? (
+                <span
+                  className={
+                    positive
+                      ? "text-[color:var(--gain)]"
+                      : "text-[color:var(--loss)]"
+                  }
+                >
+                  {signed(v.eurGain, (n) =>
+                    formatCurrency(n, "EUR", { decimals: 2 })
+                  )}
+                </span>
+              )
+              : "—"}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -177,84 +298,6 @@ function CardRow({ asset }: { asset: Asset }) {
             exp {asset.cardExpiry}
           </span>
         )}
-      </div>
-    </li>
-  );
-}
-
-function AssetRow({ v }: { v: AssetValuation }) {
-  const a = v.asset;
-  if (a.type === "card") return <CardRow asset={a} />;
-  const positive = (v.eurGain ?? 0) >= 0;
-  const showFx = a.currency !== "EUR";
-
-  return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-1.5 hover:bg-secondary/40">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{a.name}</span>
-          {a.ticker && (
-            <span className="font-numeric text-[10px] uppercase tracking-wider text-muted-foreground">
-              {a.ticker}
-            </span>
-          )}
-        </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-          {a.quantity !== undefined && a.quantity > 0 && (
-            <span className="font-numeric">
-              {a.quantity} × {v.lastPrice ? formatCurrency(v.lastPrice, a.currency, { decimals: 4 }) : "—"}
-            </span>
-          )}
-          {a.maturityDate && (
-            <span>matures {new Date(a.maturityDate).toLocaleDateString("en-IE")}</span>
-          )}
-          {v.resolvedRate !== undefined && (
-            <span className="inline-flex items-center gap-1">
-              {formatPercent(v.resolvedRate, 2)} APY
-              {v.resolvedRateLabel === "ECB DFR" && (
-                <span className="rounded border border-border px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
-                  live · ECB
-                </span>
-              )}
-            </span>
-          )}
-          {v.ytm !== undefined && (
-            <span>YTM {formatPercent(v.ytm, 2)}</span>
-          )}
-          {a.iban && (
-            <span
-              className="font-numeric text-[10px] tabular-nums"
-              data-blur-when-private
-              title={a.iban}
-            >
-              {maskIban(a.iban)}
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="text-right">
-        <div className="font-numeric text-sm tabular-nums">
-          {formatCurrency(v.eurValue, "EUR", { decimals: 0 })}
-        </div>
-        <div className="font-numeric text-[11px] tabular-nums text-muted-foreground">
-          {showFx
-            ? `${formatCurrency(v.nativeValue, a.currency, { decimals: 0 })}`
-            : v.eurGain !== undefined
-              ? (
-                <span
-                  className={cn(
-                    positive
-                      ? "text-[color:var(--gain)]"
-                      : "text-[color:var(--loss)]"
-                  )}
-                >
-                  {signed(v.eurGain, (n) =>
-                    formatCurrency(n, "EUR", { decimals: 0 })
-                  )}
-                </span>
-              )
-              : "—"}
-        </div>
       </div>
     </li>
   );

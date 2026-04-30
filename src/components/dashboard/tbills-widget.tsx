@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Calendar, ExternalLink, Landmark } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import type {
   AuctionResult,
@@ -10,22 +9,29 @@ import type {
   UpcomingAuction,
 } from "@/lib/prices/pdma";
 
-const TENOR_DAYS: Record<string, number> = {
-  "13W": 91,
-  "26W": 182,
-  "52W": 364,
-};
+// Tenors are weeks-as-string (e.g. "13W"). Convert to days dynamically so
+// new tenors (e.g. "4W") work without a code change.
+function tenorToDays(tenor: string): number {
+  const m = /^(\d+)\s*W$/i.exec(tenor.trim());
+  if (m) return parseInt(m[1], 10) * 7;
+  const months = /^(\d+)\s*M$/i.exec(tenor.trim());
+  if (months) return Math.round(parseInt(months[1], 10) * 30.4375);
+  return 0;
+}
 
 
 export function TbillsWidget({
-  defaultAmount = 10000,
+  defaultAmount,
 }: {
-  defaultAmount?: number;
+  defaultAmount: number;
 }) {
   const [data, setData] = useState<PdmaSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [amountStr, setAmountStr] = useState<string>(String(defaultAmount));
   const amount = Number(amountStr.replace(/[^\d.]/g, "")) || 0;
+  // Pinned `now` so daysUntil rendering is stable across re-renders. Refreshes
+  // when the component remounts (page navigation / hard reload).
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     fetch("/api/tbills")
@@ -95,6 +101,7 @@ export function TbillsWidget({
                 auction={a}
                 refYield={refYieldByTenor[a.tenor]}
                 amount={amount}
+                now={now}
               />
             ))}
           </ul>
@@ -132,7 +139,7 @@ export function TbillsWidget({
                 onBlur={() => {
                   if (amountStr === "") setAmountStr("0");
                 }}
-                placeholder="10000"
+                placeholder="amount"
                 className="h-7 w-28 font-numeric text-sm tabular-nums"
               />
               <span className="text-sm text-muted-foreground">EUR</span>
@@ -152,17 +159,19 @@ function UpcomingRow({
   auction,
   refYield,
   amount,
+  now,
 }: {
   auction: UpcomingAuction;
   refYield?: number;
   amount: number;
+  now: number;
 }) {
-  const days = TENOR_DAYS[auction.tenor] ?? 0;
+  const days = tenorToDays(auction.tenor);
   const expectedProfit =
     refYield !== undefined ? amount * refYield * (days / 365) : undefined;
   const date = new Date(auction.date);
   const daysFromNow = Math.round(
-    (date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    (date.getTime() - now) / (1000 * 60 * 60 * 24)
   );
 
   return (

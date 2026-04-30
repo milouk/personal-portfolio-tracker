@@ -2,7 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { RefreshCw, Loader2, AlertTriangle, Check } from "lucide-react";
+import {
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
+  Check,
+  KeyRound,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,6 +52,47 @@ export function SyncController() {
   const [triggering, setTriggering] = useState(false);
 
   const lastFinishRef = useRef<{ tr?: string; nbg?: string }>({});
+  // After a manual submit, suppress auto-reopen for a brief window so the
+  // sync script has time to consume the OTP file and flip state to running.
+  const otpSubmittedAtRef = useRef<number>(0);
+  const SUBMIT_SUPPRESS_MS = 4000;
+  // Track whether we've auto-triggered setup for the current `needs_setup`
+  // streak. We reset this when the source moves to any other state, so the
+  // next time it expires we'll trigger again.
+  const autoSetupRef = useRef<{ tr: boolean; nbg: boolean }>({
+    tr: false,
+    nbg: false,
+  });
+  // One-shot guard so we only auto-sync on the first page load, not on every
+  // re-render. Manual sync is wired through the button's `trigger()` callback.
+  const autoSyncedRef = useRef(false);
+
+  const triggerSetup = useCallback(
+    async (source: Source) => {
+      setTriggering(true);
+      try {
+        const res = await fetch("/api/sync/setup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source }),
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!res.ok) {
+          toast.error(body.error ?? `Re-auth failed (${res.status})`);
+        } else {
+          toast(`${source.toUpperCase()} re-auth started`, {
+            description: "TR is sending a code — watch for the OTP prompt.",
+          });
+        }
+      } finally {
+        setTriggering(false);
+      }
+    },
+    []
+  );
 
   const fetchState = useCallback(async () => {
     try {
@@ -53,45 +100,121 @@ export function SyncController() {
       if (!res.ok) return;
       const data = (await res.json()) as SyncState;
       setState(data);
-
-      // When either source transitions to needs_otp, open the modal.
-      const ask = (["tr", "nbg"] as Source[]).find((s) => data[s].status === "needs_otp");
-      if (ask && !otpOpen) {
-        setOtpSource(ask);
-        setOtpValue("");
-        setOtpOpen(true);
-      }
-      if (!ask && otpOpen) {
-        // OTP no longer needed (sync moved on) — close.
-        setOtpOpen(false);
-      }
-
-      // When a source transitions out of running/needs_otp, refresh server data.
-      for (const s of ["tr", "nbg"] as Source[]) {
-        const f = data[s].finishedAt;
-        if (f && f !== lastFinishRef.current[s]) {
-          lastFinishRef.current[s] = f;
-          if (data[s].status === "success") {
-            toast.success(`${s.toUpperCase()} synced`, { description: data[s].message });
-          } else if (data[s].status === "error") {
-            toast.error(`${s.toUpperCase()} sync failed`, { description: data[s].lastError });
-          } else if (data[s].status === "needs_setup") {
-            toast.warning(`${s.toUpperCase()} re-auth needed`, { description: data[s].message });
-          }
-          router.refresh();
-        }
-      }
     } catch {
       /* swallow */
     }
-  }, [otpOpen, router]);
+  }, []);
 
+  // Hold the latest fetchState in a ref so the polling effect doesn't
+  // tear down/recreate the interval on every render.
+  const fetchStateRef = useRef(fetchState);
   useEffect(() => {
-    fetchState();
+    fetchStateRef.current = fetchState;
+  }, [fetchState]);
+
+  // Polling: fast while a sync is active, slow otherwise.
+  useEffect(() => {
+    void fetchStateRef.current();
     const anyActive = isActive(state.tr.status) || isActive(state.nbg.status);
-    const interval = setInterval(fetchState, anyActive ? POLL_FAST_MS : POLL_SLOW_MS);
+    const interval = setInterval(
+      () => void fetchStateRef.current(),
+      anyActive ? POLL_FAST_MS : POLL_SLOW_MS
+    );
     return () => clearInterval(interval);
-  }, [fetchState, state.tr.status, state.nbg.status]);
+  }, [state.tr.status, state.nbg.status]);
+
+  // React to OTP / setup / completion transitions.
+  useEffect(() => {
+    const ask = (["tr", "nbg"] as Source[]).find(
+      (s) => state[s].status === "needs_otp"
+    );
+    const sinceSubmit = Date.now() - otpSubmittedAtRef.current;
+    const inGrace = sinceSubmit < SUBMIT_SUPPRESS_MS;
+    if (ask && !otpOpen && !inGrace) {
+      setOtpSource(ask);
+      setOtpValue("");
+      setOtpOpen(true);
+    } else if (!ask && otpOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate sync with external sync state
+      setOtpOpen(false);
+    }
+
+    for (const s of ["tr", "nbg"] as Source[]) {
+      if (state[s].status === "needs_setup" && !autoSetupRef.current[s]) {
+        autoSetupRef.current[s] = true;
+        toast.message(`${s.toUpperCase()} session expired`, {
+          description: "Reconnecting — check your phone for the code.",
+        });
+        void triggerSetup(s);
+      } else if (state[s].status !== "needs_setup" && autoSetupRef.current[s]) {
+        autoSetupRef.current[s] = false;
+      }
+    }
+
+    for (const s of ["tr", "nbg"] as Source[]) {
+      const f = state[s].finishedAt;
+      if (!f || f === lastFinishRef.current[s]) continue;
+      const wasUnset = lastFinishRef.current[s] === undefined;
+      lastFinishRef.current[s] = f;
+      if (wasUnset) {
+        router.refresh();
+        continue;
+      }
+      if (state[s].status === "success") {
+        toast.success(`${s.toUpperCase()} synced`, { description: state[s].message });
+        if (s === "tr" && /re-auth complete/i.test(state[s].message ?? "")) {
+          // After successful re-auth, automatically run the actual sync.
+          setTimeout(() => {
+            void fetch("/api/sync", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ source: "tr" }),
+            });
+          }, 500);
+        }
+      } else if (state[s].status === "error") {
+        toast.error(`${s.toUpperCase()} sync failed`, { description: state[s].lastError });
+      } else if (state[s].status === "needs_setup") {
+        toast.warning(`${s.toUpperCase()} re-auth needed`, { description: state[s].message });
+      }
+      router.refresh();
+    }
+  }, [state, otpOpen, router, triggerSetup]);
+
+  // Auto-sync on first page load if data is stale. Thresholds differ:
+  //  - TR: 60s (silent / fast)
+  //  - NBG: 5min (slower; triggers Viber OTP prompt — don't fire on every refresh)
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/sync", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as SyncState;
+        const isStale = (s: SourceState, thresholdMs: number) => {
+          if (s.status === "running" || s.status === "needs_otp" || s.status === "needs_setup") {
+            return false;
+          }
+          if (!s.finishedAt) return true;
+          return Date.now() - new Date(s.finishedAt).getTime() > thresholdMs;
+        };
+        const trStale = isStale(data.tr, 60_000);
+        const nbgStale = isStale(data.nbg, 5 * 60_000);
+        if (!trStale && !nbgStale) return;
+        const source: "tr" | "nbg" | "all" =
+          trStale && nbgStale ? "all" : trStale ? "tr" : "nbg";
+        await fetch("/api/sync", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source }),
+        });
+        setTimeout(() => void fetchStateRef.current(), 500);
+      } catch {
+        /* swallow */
+      }
+    })();
+  }, []);
 
   const trigger = useCallback(async () => {
     setTriggering(true);
@@ -109,13 +232,12 @@ export function SyncController() {
         toast.error(body.error ?? `Sync failed (${res.status})`);
       } else {
         toast("Sync started", { description: "Fetching live data…" });
-        // Force a state poll right away so the UI updates immediately.
-        setTimeout(fetchState, 500);
+        setTimeout(() => void fetchStateRef.current(), 500);
       }
     } finally {
       setTriggering(false);
     }
-  }, [fetchState]);
+  }, []);
 
   const submitOtp = useCallback(async () => {
     if (!otpValue.trim()) return;
@@ -135,38 +257,54 @@ export function SyncController() {
         return;
       }
       toast.success("OTP submitted");
+      otpSubmittedAtRef.current = Date.now();
       setOtpOpen(false);
       setOtpValue("");
-      setTimeout(fetchState, 500);
+      setTimeout(() => void fetchStateRef.current(), 500);
     } finally {
       setSubmittingOtp(false);
     }
-  }, [otpSource, otpValue, fetchState]);
+  }, [otpSource, otpValue]);
 
   const anyRunning = isActive(state.tr.status) || isActive(state.nbg.status);
-  const trErrorish =
-    state.tr.status === "error" || state.tr.status === "needs_setup";
+  const trNeedsSetup = state.tr.status === "needs_setup";
+  const trErrored = state.tr.status === "error";
   const nbgErrorish = state.nbg.status === "error";
+
+  let onClick = trigger;
+  let label = "Sync";
+  let variant: "default" | "destructive" = "default";
+  let Icon: React.ComponentType<{ className?: string }> = RefreshCw;
+
+  if (anyRunning) {
+    Icon = Loader2;
+    label = statusLabel(state) || "Syncing…";
+  } else if (trNeedsSetup) {
+    onClick = () => triggerSetup("tr");
+    variant = "destructive";
+    Icon = KeyRound;
+    label = "Reconnect TR";
+  } else if (trErrored || nbgErrorish) {
+    variant = "destructive";
+    Icon = AlertTriangle;
+    label = "Retry";
+  }
 
   return (
     <>
       <Button
         size="sm"
-        variant={trErrorish || nbgErrorish ? "destructive" : "default"}
-        onClick={trigger}
+        variant={variant}
+        onClick={onClick}
         disabled={triggering || anyRunning}
-        title="Sync TR + NBG now"
+        title={
+          trNeedsSetup
+            ? "TR session expired — click to re-authenticate"
+            : "Sync TR + NBG now"
+        }
       >
-        {anyRunning ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : trErrorish || nbgErrorish ? (
-          <AlertTriangle className="h-3.5 w-3.5" />
-        ) : (
-          <RefreshCw className="h-3.5 w-3.5" />
-        )}
-        <span className="hidden sm:inline">
-          {anyRunning ? statusLabel(state) : "Sync"}
-        </span>
+        <Icon className={`h-3.5 w-3.5 ${anyRunning ? "animate-spin" : ""}`} />
+        <span className="hidden sm:inline">{label}</span>
       </Button>
 
       <Dialog
@@ -183,12 +321,12 @@ export function SyncController() {
             <DialogTitle>
               {otpSource === "nbg"
                 ? "NBG — enter OTP"
-                : "Trade Republic — enter OTP"}
+                : "Trade Republic — enter code"}
             </DialogTitle>
             <DialogDescription>
               {otpSource === "nbg"
                 ? "Open Viber on your phone for the 6-digit code, then paste it here."
-                : "TR sent a code to your phone — paste it here."}
+                : "TR sent a 4-digit code to your phone (push or SMS). Paste it here."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -198,13 +336,13 @@ export function SyncController() {
               inputMode="numeric"
               pattern="\d*"
               autoComplete="one-time-code"
-              maxLength={8}
+              maxLength={otpSource === "tr" ? 4 : 8}
               value={otpValue}
               onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, ""))}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submitOtp();
               }}
-              placeholder="123456"
+              placeholder={otpSource === "tr" ? "1234" : "123456"}
               className="font-numeric text-center text-lg tracking-[0.4em]"
             />
             <div className="text-xs text-muted-foreground">
@@ -212,7 +350,13 @@ export function SyncController() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={submitOtp} disabled={submittingOtp || otpValue.length < 4}>
+            <Button
+              onClick={submitOtp}
+              disabled={
+                submittingOtp ||
+                otpValue.length < (otpSource === "tr" ? 4 : 6)
+              }
+            >
               {submittingOtp ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
@@ -232,6 +376,3 @@ function statusLabel(s: SyncState): string {
   if (s.tr.status === "running" || s.nbg.status === "running") return "Syncing…";
   return "";
 }
-
-// re-exported in case other components want to read state without polling
-export type { SyncState, SourceState, Status, Source };
