@@ -11,6 +11,11 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatCurrency, formatPercent, signed } from "@/lib/format";
 import {
   ASSET_TYPE_LABEL,
@@ -161,7 +166,7 @@ function AssetRow({ v }: { v: AssetValuation }) {
               {a.ticker}
             </span>
           )}
-          {a.isin && !a.ticker && (
+          {a.isin && a.isin !== a.name && (
             <span className="font-numeric text-[10px] tabular-nums text-muted-foreground">
               {a.isin}
             </span>
@@ -235,27 +240,70 @@ function AssetRow({ v }: { v: AssetValuation }) {
           {formatCurrency(v.eurValue, "EUR", { decimals: 2 })}
         </div>
         <div className="font-numeric text-[11px] tabular-nums text-muted-foreground">
-          {showFx
-            ? `${formatCurrency(v.nativeValue, a.currency, { decimals: 2 })}`
-            : v.eurGain !== undefined
-              ? (
-                <span
-                  className={
-                    positive
-                      ? "text-[color:var(--gain)]"
-                      : "text-[color:var(--loss)]"
-                  }
-                >
-                  {signed(v.eurGain, (n) =>
-                    formatCurrency(n, "EUR", { decimals: 2 })
-                  )}
-                </span>
-              )
-              : "—"}
+          {renderSubValue(a, v, showFx, positive)}
         </div>
       </div>
     </li>
   );
+}
+
+// What to show below the EUR value depends on the asset type:
+//   - Foreign-currency assets → native-currency equivalent
+//   - Interest account → estimated annual yield (€/yr) — P/L would be 0
+//     since the principal has no cost basis movement
+//   - Cash / deposit (no rate) → nothing useful
+//   - Everything else (etf/stock/crypto/bond/tbill) → unrealised P/L
+function renderSubValue(
+  a: Asset,
+  v: AssetValuation,
+  showFx: boolean,
+  positive: boolean
+): React.ReactNode {
+  if (showFx) {
+    return formatCurrency(v.nativeValue, a.currency, { decimals: 2 });
+  }
+  if (a.type === "interest_account") {
+    if (v.estAnnualYieldEur && v.estAnnualYieldEur > 0) {
+      const rateLabel = v.resolvedRateLabel ?? "fixed";
+      const ratePct =
+        v.resolvedRate !== undefined
+          ? formatPercent(v.resolvedRate, 2)
+          : "—";
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help underline decoration-dotted decoration-from-font underline-offset-2">
+              +{formatCurrency(v.estAnnualYieldEur, "EUR", { decimals: 2 })} / yr
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="left" className="max-w-[260px] text-xs leading-relaxed">
+            Estimate. Assumes the {rateLabel} rate stays at {ratePct} and the
+            balance is unchanged for a full year. Actual interest depends on
+            how long the cash sits at this rate and any deposits / withdrawals.
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+    return null;
+  }
+  if (a.type === "cash" || a.type === "deposit") {
+    // Plain balance with no rate — nothing meaningful to add.
+    return null;
+  }
+  if (v.eurGain !== undefined) {
+    return (
+      <span
+        className={
+          positive
+            ? "text-[color:var(--gain)]"
+            : "text-[color:var(--loss)]"
+        }
+      >
+        {signed(v.eurGain, (n) => formatCurrency(n, "EUR", { decimals: 2 }))}
+      </span>
+    );
+  }
+  return "—";
 }
 
 function maskIban(iban: string): string {

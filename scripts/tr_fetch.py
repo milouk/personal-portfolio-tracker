@@ -156,65 +156,94 @@ async def fetch() -> dict:
                 )
             got_cash = True
 
-    # ---- live prices via per-ISIN ticker subscriptions ----
-    # TR exposes a "ticker" subscription that streams bid/ask for an instrument
-    # on a specific exchange. LSX (Lang & Schwarz) is the default retail venue
-    # and is reliable for every TR-listed instrument.
+    # ---- live prices + readable names via per-ISIN subscriptions ----
+    # We subscribe to TWO streams per position:
+    #   "ticker"     — bid/ask/last on Lang & Schwarz (price)
+    #   "instrument" — instrument metadata (shortName / longName)
+    # compact_portfolio's `name` field is often just the ISIN, so without the
+    # instrument lookup the dashboard ends up showing identifiers instead of
+    # readable names like "Vanguard S&P 500".
     if positions:
-        _log("subscribing to ticker streams for live prices…")
-        sub_ids: dict[int, dict] = {}
+        _log("subscribing to ticker + instrument streams…")
+        ticker_subs: dict[int, dict] = {}
+        instrument_subs: dict[int, dict] = {}
         for p in positions:
             isin = p.get("isin")
             if not isin:
                 continue
-            sub = {"type": "ticker", "id": f"{isin}.LSX"}
             try:
-                sid = await api.subscribe(sub)
-                sub_ids[sid] = p
+                sid = await api.subscribe({"type": "ticker", "id": f"{isin}.LSX"})
+                ticker_subs[sid] = p
             except Exception as e:
                 _log(f"  ticker subscribe failed for {isin}: {e}")
-                continue
+            try:
+                sid = await api.subscribe({"type": "instrument", "id": isin})
+                instrument_subs[sid] = p
+            except Exception as e:
+                _log(f"  instrument subscribe failed for {isin}: {e}")
 
-        # Wait for one tick per subscription (or timeout). The ticker stream
-        # is push-based — first message has the latest bid/ask; we don't need
-        # to keep the subscription alive after that.
-        ticker_deadline = asyncio.get_event_loop().time() + 15
-        unresolved = set(sub_ids.keys())
-        while unresolved and asyncio.get_event_loop().time() < ticker_deadline:
+        # Wait until each subscription has produced one message, or timeout.
+        deadline = asyncio.get_event_loop().time() + 15
+        unresolved_ticker = set(ticker_subs.keys())
+        unresolved_inst = set(instrument_subs.keys())
+
+        def _pick_price(m: dict) -> float | None:
+            for key in ("last", "bid", "ask"):
+                v = m.get(key)
+                if isinstance(v, dict) and v.get("price"):
+                    try:
+                        return float(v["price"])
+                    except (TypeError, ValueError):
+                        continue
+            return None
+
+        def _pick_name(m: dict) -> str | None:
+            # Prefer shortName, fall back to other readable fields.
+            for key in ("shortName", "name", "longName"):
+                v = m.get(key)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            return None
+
+        while (unresolved_ticker or unresolved_inst) and asyncio.get_event_loop().time() < deadline:
             try:
                 recv_result = await asyncio.wait_for(api.recv(), timeout=4)
             except asyncio.TimeoutError:
                 continue
-            sid, sub, msg = recv_result
-            if sid not in unresolved:
+            sid, _sub, msg = recv_result
+            if not isinstance(msg, dict):
                 continue
-            position = sub_ids[sid]
-            # message shape: {"bid": {"price": "..."}, "ask": {"price": "..."},
-            #                "last": {"price": "..."}, ...}
-            def _pick_price(m: dict) -> float | None:
-                for key in ("last", "bid", "ask"):
-                    v = m.get(key)
-                    if isinstance(v, dict) and v.get("price"):
-                        try:
-                            return float(v["price"])
-                        except (TypeError, ValueError):
-                            continue
-                return None
-            price = _pick_price(msg) if isinstance(msg, dict) else None
-            if price is not None:
-                position["livePrice"] = price
-                qty = position.get("quantity") or 0
-                if qty:
-                    position["value"] = qty * price
-            unresolved.discard(sid)
+            if sid in unresolved_ticker:
+                position = ticker_subs[sid]
+                price = _pick_price(msg)
+                if price is not None:
+                    position["livePrice"] = price
+                    qty = position.get("quantity") or 0
+                    if qty:
+                        position["value"] = qty * price
+                unresolved_ticker.discard(sid)
+            elif sid in unresolved_inst:
+                position = instrument_subs[sid]
+                readable = _pick_name(msg)
+                # Only override when current `name` is empty or equals the
+                # ISIN (i.e. compact_portfolio didn't have a real name).
+                if readable and (
+                    not position.get("name")
+                    or position["name"] == position.get("isin")
+                ):
+                    position["name"] = readable
+                unresolved_inst.discard(sid)
 
         # Unsubscribe to be polite.
-        for sid in list(sub_ids.keys()):
+        for sid in list(ticker_subs.keys()) + list(instrument_subs.keys()):
             try:
                 await api.unsubscribe(sid)
             except Exception:
                 pass
-        _log(f"  resolved live prices for {len(sub_ids) - len(unresolved)}/{len(sub_ids)} positions")
+        _log(
+            f"  prices: {len(ticker_subs) - len(unresolved_ticker)}/{len(ticker_subs)}, "
+            f"names: {len(instrument_subs) - len(unresolved_inst)}/{len(instrument_subs)}"
+        )
 
     try:
         await api.close()

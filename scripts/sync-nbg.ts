@@ -1211,14 +1211,16 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
   return { positions };
 }
 
-// Greek T-bill / bond ISINs all start with GR000. Anything else discovered
-// via the NBG investments scrape we treat as a bond (closer to the truth than
-// classifying as a stock/etf without quantity data).
+// Greek government securities (T-bills + bonds) all use ISO ISIN code "GR"
+// (any GR\d… ISIN issued by ΟΔΔΗΧ). Distinguishing T-bill vs longer bond
+// from the ISIN alone isn't reliable, so we classify everything Greek as a
+// T-bill (the common case for retail NBG holdings) and let the user
+// re-type to "bond" via the dashboard if needed.
 function classifyInvestmentByIsin(isin: string): {
   type: string;
   source: string;
 } {
-  if (/^GR000/i.test(isin)) {
+  if (/^GR\d/i.test(isin)) {
     return { type: "tbill", source: "greek-tbills" };
   }
   return { type: "bond", source: "nbg" };

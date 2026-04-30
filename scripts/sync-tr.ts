@@ -206,12 +206,36 @@ function guessTypeFromIsin(isin: string, name: string): string {
   return "etf";
 }
 
+// TR's synthetic crypto ISINs encode the ticker symbol between XF000 and the
+// trailing checksum digits — e.g. XF000LTC0015 → LTC, XF000BTC0017 → BTC.
+// We use that as both `ticker` and a best-guess CoinGecko id (lowercase name).
+function tickerFromCryptoIsin(isin: string): string | undefined {
+  const m = /^XF000([A-Z0-9]{2,5})\d{2,4}$/i.exec(isin);
+  return m ? m[1].toUpperCase() : undefined;
+}
+
+// Map well-known TR crypto names to CoinGecko ids. For anything unknown we
+// fall back to `lowercase(name)` which is right for most coins.
+const COINGECKO_BY_NAME: Record<string, string> = {
+  bitcoin: "bitcoin",
+  litecoin: "litecoin",
+  ethereum: "ethereum",
+  solana: "solana",
+  cardano: "cardano",
+  ripple: "ripple",
+  dogecoin: "dogecoin",
+  polkadot: "polkadot",
+  polygon: "matic-network",
+  avalanche: "avalanche-2",
+};
+
 function autoCreatePosition(p: TrPosition): Asset {
   const now = new Date().toISOString();
-  return {
+  const type = guessTypeFromIsin(p.isin, p.name);
+  const asset: Asset = {
     id: `tr-${p.isin.toLowerCase()}`,
     name: p.name,
-    type: guessTypeFromIsin(p.isin, p.name),
+    type,
     source: "trade-republic",
     currency: "EUR",
     isin: p.isin,
@@ -219,6 +243,14 @@ function autoCreatePosition(p: TrPosition): Asset {
     createdAt: now,
     updatedAt: now,
   };
+  if (type === "crypto") {
+    const ticker = tickerFromCryptoIsin(p.isin);
+    if (ticker) asset.ticker = ticker;
+    const nameKey = (p.name || "").toLowerCase().trim();
+    asset.coingeckoId =
+      COINGECKO_BY_NAME[nameKey] ?? (nameKey ? nameKey.replace(/\s+/g, "-") : undefined);
+  }
+  return asset;
 }
 
 function autoCreateCashAsset(): Asset {
@@ -261,6 +293,26 @@ async function applyUpdates(
       details.push(
         `  + created ${asset.id} (${p.isin}, ${asset.type}) — ${p.name}`
       );
+      updated++;
+    } else if (
+      // Existing asset whose name is still the placeholder ISIN — replace
+      // with the readable name pytr now returns from the instrument stream.
+      p.name &&
+      p.name !== p.isin &&
+      asset.name === p.isin
+    ) {
+      const before = asset.name;
+      asset.name = p.name;
+      asset.updatedAt = now;
+      await appendEvent({
+        type: "asset.updated",
+        at: now,
+        assetId: asset.id,
+        before: { name: before },
+        after: { name: p.name },
+        via: "pytr",
+      });
+      details.push(`  ✓ ${asset.id}: name "${before}" → "${p.name}"`);
       updated++;
     }
     const before = {
