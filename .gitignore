@@ -45,10 +45,13 @@ next-env.d.ts
 /data/events.jsonl
 /data/prices.json
 /data/fx.json
-/data/imports/
 /data/pdma.json
 /data/ecb.json
 /data/nbg/
 /data/tr-transactions.jsonl
 /data/sync/
 /.venv/
+
+# Demo build output
+/out/
+/.api-backup/

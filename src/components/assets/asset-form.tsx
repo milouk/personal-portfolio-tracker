@@ -46,6 +46,7 @@ const TYPE_PRESETS: AssetType[] = [
   "interest_account",
   "deposit",
   "cash",
+  "card",
 ];
 
 const TYPE_FIELDS: Record<AssetType, Set<keyof FormData>> = {
@@ -68,9 +69,10 @@ const TYPE_FIELDS: Record<AssetType, Set<keyof FormData>> = {
     "maturityDate",
     "marketValueOverride",
   ]),
-  interest_account: new Set(["amount", "rate", "rateSource"]),
-  deposit: new Set(["amount"]),
+  interest_account: new Set(["amount", "rate", "rateSource", "iban"]),
+  deposit: new Set(["amount", "iban"]),
   cash: new Set(["amount"]),
+  card: new Set(["cardLast4", "cardNetwork", "cardExpiry", "cardActive"]),
 };
 
 export function AssetForm({

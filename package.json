@@ -12,7 +12,9 @@
     "sync:tr": "tsx scripts/sync-tr.ts",
     "sync:tr:setup": "tsx scripts/sync-tr-setup.ts",
     "sync:tr:transactions": "tsx scripts/sync-tr-transactions.ts",
-    "sync:all": "tsx scripts/sync-all.ts"
+    "sync:all": "tsx scripts/sync-all.ts",
+    "demo:build": "tsx scripts/build-demo.ts",
+    "demo:dev": "DEMO=1 NEXT_PUBLIC_DEMO=1 next dev"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.0",

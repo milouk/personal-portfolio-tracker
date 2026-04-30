@@ -18,4 +18,5 @@ export const TYPE_COLOR: Record<AssetType, string> = {
   interest_account: "var(--chart-3)",
   deposit: "var(--chart-7)",
   cash: "var(--chart-8)",
+  card: "var(--chart-6)",
 };

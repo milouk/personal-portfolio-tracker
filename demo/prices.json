@@ -1,0 +1,23 @@
+{
+  "demo-vwce": {
+    "symbol": "VWCE.DE",
+    "price": 153.42,
+    "currency": "EUR",
+    "source": "yahoo",
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  },
+  "demo-googl": {
+    "symbol": "GOOGL",
+    "price": 374.21,
+    "currency": "USD",
+    "source": "yahoo",
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  },
+  "demo-btc": {
+    "symbol": "BTC",
+    "price": 64823,
+    "currency": "EUR",
+    "source": "coingecko",
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  }
+}

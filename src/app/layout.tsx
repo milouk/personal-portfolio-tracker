@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PrivacyProvider } from "@/components/privacy-provider";
+import { DemoBanner } from "@/components/demo-banner";
 import "./globals.css";
 
 const sans = Onest({
@@ -50,6 +51,7 @@ export default function RootLayout({
         >
           <PrivacyProvider>
             <TooltipProvider delayDuration={150}>
+              {process.env.NEXT_PUBLIC_DEMO === "1" && <DemoBanner />}
               {children}
               <Toaster richColors position="bottom-right" />
             </TooltipProvider>

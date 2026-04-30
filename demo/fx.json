@@ -1,0 +1,8 @@
+{
+  "eurUsd": {
+    "base": "USD",
+    "quote": "EUR",
+    "rate": 0.8543,
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  }
+}

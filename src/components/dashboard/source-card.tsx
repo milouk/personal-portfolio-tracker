@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Banknote,
   Building2,
-  Bitcoin,
   Coins,
+  CreditCard,
   Landmark,
   Wallet,
   TrendingUp,
@@ -15,6 +15,7 @@ import { formatCurrency, formatPercent, signed } from "@/lib/format";
 import {
   ASSET_TYPE_LABEL,
   SOURCE_LABEL,
+  type Asset,
   type AssetSource,
   type AssetValuation,
 } from "@/lib/types";
@@ -53,9 +54,10 @@ export function SourceCard({
   const allocPct = totalEur > 0 ? subtotal / totalEur : 0;
   const positive = subGain >= 0;
 
-  // Group rows by type
+  // Group rows by type. Hide inactive cards entirely.
   const byType = new Map<string, AssetValuation[]>();
   for (const v of valuations) {
+    if (v.asset.type === "card" && v.asset.cardActive === false) continue;
     const arr = byType.get(v.asset.type) ?? [];
     arr.push(v);
     byType.set(v.asset.type, arr);
@@ -135,8 +137,54 @@ export function SourceCard({
   );
 }
 
+function maskIban(iban: string): string {
+  const compact = iban.replace(/\s/g, "");
+  if (compact.length < 8) return compact;
+  return `${compact.slice(0, 4)} ··· ${compact.slice(-4)}`;
+}
+
+const NETWORK_LABEL: Record<string, string> = {
+  visa: "VISA",
+  mastercard: "Mastercard",
+  maestro: "Maestro",
+  amex: "Amex",
+  other: "Card",
+};
+
+function CardRow({ asset }: { asset: Asset }) {
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-1.5 hover:bg-secondary/40">
+      <div className="flex min-w-0 items-center gap-2">
+        <CreditCard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-sm font-medium">{asset.name}</span>
+        {asset.cardLast4 && (
+          <span
+            className="font-numeric text-[10px] tabular-nums text-muted-foreground"
+            data-blur-when-private
+          >
+            ···· {asset.cardLast4}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        {asset.cardNetwork && (
+          <span className="rounded border border-border px-1.5 py-0.5">
+            {NETWORK_LABEL[asset.cardNetwork] ?? asset.cardNetwork}
+          </span>
+        )}
+        {asset.cardExpiry && (
+          <span className="font-numeric tabular-nums" data-blur-when-private>
+            exp {asset.cardExpiry}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
 function AssetRow({ v }: { v: AssetValuation }) {
   const a = v.asset;
+  if (a.type === "card") return <CardRow asset={a} />;
   const positive = (v.eurGain ?? 0) >= 0;
   const showFx = a.currency !== "EUR";
 
@@ -172,6 +220,15 @@ function AssetRow({ v }: { v: AssetValuation }) {
           )}
           {v.ytm !== undefined && (
             <span>YTM {formatPercent(v.ytm, 2)}</span>
+          )}
+          {a.iban && (
+            <span
+              className="font-numeric text-[10px] tabular-nums"
+              data-blur-when-private
+              title={a.iban}
+            >
+              {maskIban(a.iban)}
+            </span>
           )}
         </div>
       </div>

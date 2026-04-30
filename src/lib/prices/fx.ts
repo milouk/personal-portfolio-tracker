@@ -1,11 +1,14 @@
 import "server-only";
 import { isFresh, readFxCache, writeFxCache } from "./cache";
+import { IS_DEMO } from "../storage/paths";
 import type { FxRate } from "../types";
 
 const ONE_HOUR = 60 * 60 * 1000;
 
 export async function getEurUsdRate(force = false): Promise<FxRate> {
   const cache = await readFxCache();
+  // Demo mode: never hit the network, always serve the seeded value.
+  if (IS_DEMO && cache.eurUsd) return cache.eurUsd;
   if (!force && cache.eurUsd && isFresh(cache.eurUsd.fetchedAt, ONE_HOUR)) {
     return cache.eurUsd;
   }

@@ -8,7 +8,10 @@ export type AssetType =
   | "crypto"
   | "cash"
   | "interest_account"
-  | "deposit";
+  | "deposit"
+  | "card";
+
+export type CardNetwork = "visa" | "mastercard" | "maestro" | "amex" | "other";
 
 export type AssetSource =
   | "greek-tbills"
@@ -27,6 +30,7 @@ export const ASSET_TYPE_LABEL: Record<AssetType, string> = {
   cash: "Cash",
   interest_account: "Interest Account",
   deposit: "Deposit",
+  card: "Card",
 };
 
 export const SOURCE_LABEL: Record<AssetSource, string> = {
@@ -60,6 +64,15 @@ export type Asset = {
   coingeckoId?: string;
   // For ETF/stock: ISIN if you have it
   isin?: string;
+
+  // Account / card metadata (display only — not used in valuation)
+  iban?: string;
+  accountNumber?: string;
+  // Cards
+  cardLast4?: string;
+  cardNetwork?: CardNetwork;
+  cardExpiry?: string;     // "MM/YY"
+  cardActive?: boolean;    // false = closed/expired, hide by default
 
   // Quantity-based (ETF/stock/crypto)
   quantity?: number;

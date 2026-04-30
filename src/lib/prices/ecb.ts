@@ -1,7 +1,7 @@
 import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { DATA_DIR } from "../storage/paths";
+import { DATA_DIR, IS_DEMO } from "../storage/paths";
 
 export type EcbRate = {
   // ECB Deposit Facility Rate as a decimal (e.g. 0.02 for 2%)
@@ -31,6 +31,7 @@ async function writeCache(rate: EcbRate) {
 
 export async function getEcbDepositFacilityRate(force = false): Promise<EcbRate> {
   const cached = await readCache();
+  if (IS_DEMO && cached) return cached;
   if (
     !force &&
     cached &&

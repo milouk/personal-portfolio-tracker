@@ -26,6 +26,7 @@ export function Header({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const isDark = mounted ? (resolvedTheme ?? theme) === "dark" : true;
+  const isDemo = process.env.NEXT_PUBLIC_DEMO === "1";
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/70 backdrop-blur-xl">
@@ -59,7 +60,7 @@ export function Header({
           })}
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
-          <SyncController />
+          {!isDemo && <SyncController />}
           <Button
             variant="ghost"
             size="icon"
@@ -95,7 +96,7 @@ export function Header({
               )}
             </span>
           </Button>
-          {onAddAsset && (
+          {onAddAsset && !isDemo && (
             <Button size="sm" onClick={onAddAsset}>
               <Plus className="h-3.5 w-3.5" />
               Add asset

@@ -1,5 +1,6 @@
 import "server-only";
 import type { Asset, PriceQuote } from "../types";
+import { IS_DEMO } from "../storage/paths";
 import { isFresh, readPriceCache, writePriceCache } from "./cache";
 import { fetchCryptoPrice } from "./coingecko";
 import { fetchStooqQuote } from "./stooq";
@@ -36,8 +37,11 @@ export async function getPriceForAsset(
   }
   if (!asset.ticker && !asset.coingeckoId) return null;
 
-  const key = priceKey(asset);
   const cache = await readPriceCache();
+  // Demo mode: prices are seeded under the asset id (matches demo/prices.json).
+  if (IS_DEMO) return cache[asset.id] ?? null;
+
+  const key = priceKey(asset);
   const cached = cache[key];
   if (!force && cached && isFresh(cached.fetchedAt, PRICE_TTL_MS)) return cached;
 

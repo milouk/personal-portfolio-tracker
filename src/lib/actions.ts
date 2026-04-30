@@ -7,7 +7,14 @@ import {
   deleteAsset,
   updateAsset,
 } from "./storage/portfolio";
+import { IS_DEMO } from "./storage/paths";
 import type { Asset, AssetSource, AssetType, Currency } from "./types";
+
+function refuseInDemo() {
+  if (IS_DEMO) {
+    throw new Error("Demo mode is read-only — fork the repo to edit your own data.");
+  }
+}
 
 const CurrencyEnum = z.enum(["EUR", "USD"]);
 const TypeEnum = z.enum([
@@ -19,6 +26,7 @@ const TypeEnum = z.enum([
   "cash",
   "interest_account",
   "deposit",
+  "card",
 ]);
 const SourceEnum = z.enum([
   "greek-tbills",
@@ -37,6 +45,12 @@ const AssetSchema = z.object({
   ticker: z.string().optional(),
   coingeckoId: z.string().optional(),
   isin: z.string().optional(),
+  iban: z.string().optional(),
+  accountNumber: z.string().optional(),
+  cardLast4: z.string().optional(),
+  cardNetwork: z.enum(["visa", "mastercard", "maestro", "amex", "other"]).optional(),
+  cardExpiry: z.string().optional(),
+  cardActive: z.boolean().optional(),
   quantity: z.number().nonnegative().optional(),
   costBasis: z.number().nonnegative().optional(),
   amount: z.number().optional(),
@@ -63,6 +77,7 @@ function clean<T extends Record<string, unknown>>(obj: T): T {
 }
 
 export async function createAssetAction(input: unknown) {
+  refuseInDemo();
   const parsed = AssetSchema.parse(input);
   const cleaned = clean(parsed) as AssetInput;
   const created = await createAsset(cleaned);
@@ -71,6 +86,7 @@ export async function createAssetAction(input: unknown) {
 }
 
 export async function updateAssetAction(id: string, patch: unknown) {
+  refuseInDemo();
   const parsed = AssetSchema.partial().parse(patch);
   const cleaned = clean(parsed) as Partial<Asset>;
   const updated = await updateAsset(id, cleaned);
@@ -79,6 +95,7 @@ export async function updateAssetAction(id: string, patch: unknown) {
 }
 
 export async function deleteAssetAction(id: string) {
+  refuseInDemo();
   const ok = await deleteAsset(id);
   revalidatePath("/", "layout");
   return ok;
