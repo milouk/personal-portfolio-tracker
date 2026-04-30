@@ -25,10 +25,18 @@
 
 services:
   app:
+    # Pulled from GitHub Container Registry by default — version pin via
+    # APP_TAG (e.g. v1.2.3) or leave at `latest`. Images are public, so no
+    # `docker login` is required to pull.
+    image: ${APP_IMAGE:-ghcr.io/milouk/personal-portfolio-tracker}:${APP_TAG:-latest}
+    # Local fallback: `docker compose build` (or `up --build`) compiles the
+    # Dockerfile in this directory. Useful when you've patched the source.
     build: .
-    image: portfolio-tracker:latest
     container_name: portfolio-tracker
     restart: unless-stopped
+    # Pull a fresh image when one is available — pair with `docker compose pull`
+    # or watchtower / a cron job to upgrade automatically.
+    pull_policy: missing
     # All known config keys can be passed via .env.local — see .env.example for
     # the full list (NBG_*, TR_*, SMTP_*, NTFY_*, PORTFOLIO_API_TOKEN).
     env_file:

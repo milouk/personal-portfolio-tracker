@@ -76,10 +76,19 @@ type Portfolio = { version: number; assets: Asset[]; updatedAt: string };
 
 // ---------- io ----------
 async function readPortfolio(): Promise<Portfolio> {
-  return JSON.parse(await fs.readFile(PORTFOLIO_FILE, "utf8"));
+  try {
+    return JSON.parse(await fs.readFile(PORTFOLIO_FILE, "utf8"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      console.log("[tr] no portfolio.json yet — creating an empty one");
+      return { version: 1, assets: [], updatedAt: new Date().toISOString() };
+    }
+    throw e;
+  }
 }
 async function writePortfolio(p: Portfolio): Promise<void> {
   p.updatedAt = new Date().toISOString();
+  await fs.mkdir(path.dirname(PORTFOLIO_FILE), { recursive: true });
   await fs.writeFile(PORTFOLIO_FILE, JSON.stringify(p, null, 2), "utf8");
 }
 async function appendEvent(event: object): Promise<void> {
@@ -103,14 +112,16 @@ function findPytrHelper(): string {
   return "python3";
 }
 
-// Notification wrapper that respects --no-notify.
+// Notification wrapper that respects --no-notify. Sync-status pings go to
+// ntfy (push) only — email is reserved for the calendar reminder script so
+// the inbox stays quiet.
 async function alert(
   title: string,
   body: string,
   priority: "low" | "normal" | "high" = "normal"
 ): Promise<void> {
   if (!NOTIFY) return;
-  await notify({ title, body, priority });
+  await notify({ title, body, priority, channels: { email: false } });
 }
 
 // ---------- run pytr helper ----------
@@ -183,22 +194,74 @@ function findCashAsset(portfolio: Portfolio): Asset | undefined {
   );
 }
 
+// Best-guess asset type from a TR ISIN:
+//   - XF000* — TR's synthetic crypto ISINs
+//   - IE0007UPSEA3-style or anything with "bond" in the name → bond/tbill
+//   - Otherwise default to ETF (most common Trade Republic holding)
+function guessTypeFromIsin(isin: string, name: string): string {
+  if (/^XF000/i.test(isin)) return "crypto";
+  const n = name.toLowerCase();
+  if (/\bbond\b|term deposit|money[\s-]?market/.test(n)) return "bond";
+  if (/\bt[\s-]?bill\b/.test(n)) return "tbill";
+  return "etf";
+}
+
+function autoCreatePosition(p: TrPosition): Asset {
+  const now = new Date().toISOString();
+  return {
+    id: `tr-${p.isin.toLowerCase()}`,
+    name: p.name,
+    type: guessTypeFromIsin(p.isin, p.name),
+    source: "trade-republic",
+    currency: "EUR",
+    isin: p.isin,
+    quantity: p.quantity,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function autoCreateCashAsset(): Asset {
+  const now = new Date().toISOString();
+  return {
+    id: "tr-cash",
+    name: "Trade Republic Cash",
+    type: "interest_account",
+    source: "trade-republic",
+    currency: "EUR",
+    rateSource: "ecb-dfr",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 async function applyUpdates(
   portfolio: Portfolio,
   data: Extract<TrFetchResult, { ok: true }>
-): Promise<{ updated: number; skipped: number; details: string[] }> {
+): Promise<{ updated: number; details: string[] }> {
   const details: string[] = [];
   let updated = 0;
-  let skipped = 0;
   const now = new Date().toISOString();
 
   // 1. Positions by ISIN
   for (const p of data.positions) {
-    const asset = findAssetByIsin(portfolio, p.isin);
+    let asset = findAssetByIsin(portfolio, p.isin);
     if (!asset) {
-      details.push(`  ? unknown ISIN ${p.isin} (${p.name}) qty=${p.quantity} value=€${p.value.toFixed(2)} — no matching asset`);
-      skipped++;
-      continue;
+      // First-run convenience: bootstrap the missing asset from what pytr
+      // discovered. Type is best-guessed from ISIN + name; user can refine
+      // via the dashboard later.
+      asset = autoCreatePosition(p);
+      portfolio.assets.push(asset);
+      await appendEvent({
+        type: "asset.created",
+        at: asset.updatedAt,
+        asset,
+        via: "pytr (first-run auto-create)",
+      });
+      details.push(
+        `  + created ${asset.id} (${p.isin}, ${asset.type}) — ${p.name}`
+      );
+      updated++;
     }
     const before = {
       quantity: asset.quantity,
@@ -287,34 +350,40 @@ async function applyUpdates(
     .filter((c) => (c.currency || "EUR").toUpperCase() === "EUR")
     .reduce((sum, c) => sum + c.amount, 0);
   if (data.cash.length > 0) {
-    const cashAsset = findCashAsset(portfolio);
-    if (cashAsset) {
-      const before = cashAsset.amount;
-      if (before !== eurCash) {
-        cashAsset.amount = Number(eurCash.toFixed(2));
-        cashAsset.updatedAt = now;
-        await appendEvent({
-          type: "asset.updated",
-          at: now,
-          assetId: cashAsset.id,
-          before: { amount: before },
-          after: { amount: cashAsset.amount },
-          via: "pytr",
-        });
-        details.push(
-          `  ✓ ${cashAsset.id}: cash ${before ?? "—"} → €${cashAsset.amount.toFixed(2)}`
-        );
-        updated++;
-      } else {
-        details.push(`  = ${cashAsset.id}: cash unchanged €${eurCash.toFixed(2)}`);
-      }
+    let cashAsset = findCashAsset(portfolio);
+    if (!cashAsset) {
+      cashAsset = autoCreateCashAsset();
+      portfolio.assets.push(cashAsset);
+      await appendEvent({
+        type: "asset.created",
+        at: cashAsset.updatedAt,
+        asset: cashAsset,
+        via: "pytr (first-run auto-create)",
+      });
+      details.push(`  + created ${cashAsset.id} (interest_account, ECB DFR)`);
+    }
+    const before = cashAsset.amount;
+    if (before !== eurCash) {
+      cashAsset.amount = Number(eurCash.toFixed(2));
+      cashAsset.updatedAt = now;
+      await appendEvent({
+        type: "asset.updated",
+        at: now,
+        assetId: cashAsset.id,
+        before: { amount: before },
+        after: { amount: cashAsset.amount },
+        via: "pytr",
+      });
+      details.push(
+        `  ✓ ${cashAsset.id}: cash ${before ?? "—"} → €${cashAsset.amount.toFixed(2)}`
+      );
+      updated++;
     } else {
-      details.push(`  ? no TR cash asset found in portfolio.json — got €${eurCash.toFixed(2)}`);
-      skipped++;
+      details.push(`  = ${cashAsset.id}: cash unchanged €${eurCash.toFixed(2)}`);
     }
   }
 
-  return { updated, skipped, details };
+  return { updated, details };
 }
 
 // ---------- main ----------
@@ -360,15 +429,15 @@ async function main() {
   );
 
   const portfolio = await readPortfolio();
-  const { updated, skipped, details } = await applyUpdates(portfolio, result);
+  const { updated, details } = await applyUpdates(portfolio, result);
   for (const line of details) console.log(line);
 
   if (updated > 0) {
     await writePortfolio(portfolio);
-    console.log(`[tr] portfolio updated · ${updated} change(s), ${skipped} skipped`);
+    console.log(`[tr] portfolio updated · ${updated} change(s)`);
     void alert("Trade Republic synced", `${updated} update(s) written.`, "low");
   } else {
-    console.log(`[tr] no changes (${skipped} unmatched ISINs)`);
+    console.log("[tr] no changes");
   }
 
   await patchState("tr", {
@@ -376,6 +445,26 @@ async function main() {
     finishedAt: new Date().toISOString(),
     message: updated > 0 ? `${updated} update(s) written` : "No changes",
   });
+
+  // Fire-and-forget: refresh the full TR transaction timeline so the History
+  // view stays current. Runs detached — sync:tr already returned success and
+  // doesn't block on this. Any error is logged by the child process itself.
+  // Skip if SKIP_TR_TRANSACTIONS=1 (handy for tests) or if running inside the
+  // sync-tr-transactions itself (we set TR_TX_CHILD to break a recursion).
+  if (
+    !process.env.SKIP_TR_TRANSACTIONS &&
+    !process.env.TR_TX_CHILD
+  ) {
+    const txScript = path.join(__dirname, "sync-tr-transactions.ts");
+    console.log("[tr] chaining sync:tr:transactions in background…");
+    const child = spawn("npx", ["tsx", txScript], {
+      cwd: ROOT,
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, TR_TX_CHILD: "1" },
+    });
+    child.unref();
+  }
 }
 
 main().catch(async (err) => {

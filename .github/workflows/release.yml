@@ -1,0 +1,107 @@
+name: Release
+
+# Triggers a Docker image build + push to GitHub Container Registry (ghcr.io)
+# whenever a semver tag is pushed.
+#
+# Cut a release with:
+#     git tag v1.2.3
+#     git push --tags
+#
+# Or run manually from the GitHub UI ("Run workflow" → enter version).
+#
+# After the very first push, manually flip the package to Public at:
+#   https://github.com/users/milouk/packages/container/personal-portfolio-tracker/settings
+# (Visibility → Change → Public). Every subsequent push reuses that setting.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write          # for creating GitHub Releases
+  packages: write          # for ghcr.io push
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw="${{ inputs.version }}"
+          else
+            raw="${GITHUB_REF#refs/tags/}"
+          fi
+          # Git tag uses `v1.2.3`, but docker/metadata-action's semver pattern
+          # strips the leading `v` for the image tag. Expose both so the
+          # release body can reference the actual published image tag.
+          echo "version=${raw}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${raw#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # v1.2.3 → v1.2.3, v1.2, v1, latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=Personal Portfolio Tracker
+            org.opencontainers.image.description=Self-hosted net-worth dashboard with live prices and broker sync.
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Personal-Use
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          name: ${{ steps.ver.outputs.version }}
+          body: |
+            ## Container image
+
+            ```bash
+            docker pull ${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.image_tag }}
+            docker pull ${{ env.IMAGE_NAME }}:latest
+            ```
+
+            Multi-arch: `linux/amd64`, `linux/arm64`. Public — no `docker login` needed.

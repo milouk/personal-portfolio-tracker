@@ -14,6 +14,8 @@ export type CalendarEvent = {
   daysUntil: number;
   assetId: string;
   assetName: string;
+  /** "tbill" / "bond" for maturity events; "etf" / "stock" for dividends. */
+  assetType: string;
   amountEur?: number;
   detail?: string;
 };
@@ -81,6 +83,7 @@ export async function buildCalendar(
         daysUntil: days,
         assetId: a.id,
         assetName: a.name,
+        assetType: a.type,
         amountEur: face,
         detail:
           a.faceValue && a.purchasePrice
@@ -150,6 +153,7 @@ export async function buildCalendar(
           daysUntil: days,
           assetId: a.id,
           assetName: a.name,
+          assetType: a.type,
           amountEur: totalAmount,
           detail: entry.amount ? `≈ ${entry.amount}/share` : undefined,
         });
@@ -167,6 +171,7 @@ export async function buildCalendar(
           daysUntil: days,
           assetId: a.id,
           assetName: a.name,
+          assetType: a.type,
           amountEur: totalAmount,
         });
       }

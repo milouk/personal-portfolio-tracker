@@ -23,8 +23,11 @@ ARG PYTHON_VERSION=3.12
 FROM node:${NODE_VERSION}-slim AS jsdeps
 WORKDIR /app
 COPY package.json package-lock.json* ./
+# Don't drop optionalDependencies — Tailwind v4 / Next 16 ship platform-
+# specific native binaries (lightningcss, swc) under optionalDependencies,
+# and `npm ci --omit=optional` removes the matching arch and breaks the build.
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=optional
+    npm ci
 
 # ---------- 2. build Next.js ----------
 FROM node:${NODE_VERSION}-slim AS jsbuild
@@ -52,9 +55,10 @@ ENV NODE_ENV=production \
     # pytr writes credentials/cache here; mount /data as a volume so they persist.
     HOME=/data
 
-# Python deps
+# Python deps. The Playwright image is Ubuntu Jammy (22.04) which ships pip
+# 22.x — no PEP 668 marker, so a plain system-wide install works.
 COPY requirements.txt ./
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Production JS deps + built Next.js output
 COPY --from=jsdeps /app/node_modules ./node_modules

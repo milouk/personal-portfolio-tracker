@@ -20,6 +20,8 @@ import nodemailer from "nodemailer";
 export type NotifyOptions = {
   title: string;
   body: string;
+  /** Pre-rendered HTML for email — falls back to a wrapped <p> of `body`. */
+  html?: string;
   /** Higher → ntfy priority bump; surfaces email subject prefix. */
   priority?: "low" | "normal" | "high";
   /** Override recipient list per-call. */
@@ -56,6 +58,7 @@ async function emailNotify(
   title: string,
   body: string,
   priority: "low" | "normal" | "high",
+  html?: string,
   to?: string[]
 ): Promise<{ ok: boolean; error?: string }> {
   const transport = getTransport();
@@ -73,7 +76,7 @@ async function emailNotify(
       to: recipients.join(", "),
       subject: `${subjectPrefix}${title}`,
       text: body,
-      html: `<p>${body.replace(/\n/g, "<br>")}</p>`,
+      html: html ?? `<p>${body.replace(/\n/g, "<br>")}</p>`,
     });
     return { ok: true };
   } catch (e) {
@@ -119,10 +122,9 @@ export async function notify(opts: NotifyOptions): Promise<void> {
   const tasks: Promise<{ kind: string; result: { ok: boolean; error?: string } }>[] = [];
   if (useEmail) {
     tasks.push(
-      emailNotify(opts.title, opts.body, priority, opts.emailTo).then((result) => ({
-        kind: "email",
-        result,
-      }))
+      emailNotify(opts.title, opts.body, priority, opts.html, opts.emailTo).then(
+        (result) => ({ kind: "email", result })
+      )
     );
   }
   if (useNtfy) {

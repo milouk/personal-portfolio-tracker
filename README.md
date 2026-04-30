@@ -5,6 +5,9 @@
 [![Tailwind](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss)](https://tailwindcss.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript)](https://www.typescriptlang.org)
 [![Deploy demo](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/deploy-demo.yml/badge.svg)](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/deploy-demo.yml)
+[![Release](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/release.yml/badge.svg)](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/release.yml)
+[![GHCR](https://img.shields.io/badge/ghcr.io-milouk%2Fpersonal--portfolio--tracker-2188ff?logo=github)](https://github.com/milouk/personal-portfolio-tracker/pkgs/container/personal-portfolio-tracker)
+[![Latest release](https://img.shields.io/github/v/release/milouk/personal-portfolio-tracker?logo=github)](https://github.com/milouk/personal-portfolio-tracker/releases/latest)
 [![License](https://img.shields.io/badge/license-personal--use-blue)](#license)
 
 A self-hosted dashboard for tracking your net worth across brokers, banks,
@@ -130,15 +133,48 @@ endpoints are open — keep the dashboard on localhost or behind a tunnel.
 
 ## Docker
 
-The included `Dockerfile` + `compose.yaml` bundle Node 22, Python 3, pytr, and
-Playwright/Chromium into a single image. Everything runs locally — no external
-services.
+Multi-arch images (`linux/amd64`, `linux/arm64`) are published on every
+release to **GitHub Container Registry**:
 
-### One-line up
+```text
+ghcr.io/milouk/personal-portfolio-tracker
+```
+
+Tags follow semver: each release gets `vX.Y.Z`, `vX.Y`, `vX`, plus `latest`.
+Images are public — no `docker login` needed to pull.
+
+### One-line up (pulls from GHCR)
 
 ```bash
 cp .env.example .env.local       # fill in the vars you actually want
 docker compose up -d             # dashboard at http://localhost:3000
+```
+
+`compose.yaml` defaults to `ghcr.io/milouk/personal-portfolio-tracker:latest`.
+Pin a specific version with `APP_TAG`:
+
+```bash
+APP_TAG=v1.2.3 docker compose up -d
+```
+
+### Upgrading
+
+Whenever a new release is cut, the new image is on Docker Hub within minutes.
+On your server:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+For unattended updates, drop in [Watchtower](https://containrrr.dev/watchtower/)
+or run the above as a daily cron job.
+
+### Building locally
+
+If you've patched the source and want to run your local copy:
+
+```bash
+docker compose up -d --build      # rebuilds from ./Dockerfile, ignores registry
 ```
 
 ### Passing environment variables

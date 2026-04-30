@@ -88,11 +88,22 @@ type Asset = {
 type Portfolio = { version: number; assets: Asset[]; updatedAt: string };
 
 async function readPortfolio(): Promise<Portfolio> {
-  const raw = await fs.readFile(PORTFOLIO_FILE, "utf8");
-  return JSON.parse(raw) as Portfolio;
+  try {
+    const raw = await fs.readFile(PORTFOLIO_FILE, "utf8");
+    return JSON.parse(raw) as Portfolio;
+  } catch (e) {
+    // First-run: no portfolio.json yet — bootstrap an empty one so the rest
+    // of the sync (including auto-creation of NBG accounts) can proceed.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      console.log("[nbg] no portfolio.json yet — creating an empty one");
+      return { version: 1, assets: [], updatedAt: new Date().toISOString() };
+    }
+    throw e;
+  }
 }
 async function writePortfolio(p: Portfolio): Promise<void> {
   p.updatedAt = new Date().toISOString();
+  await ensureDir(path.dirname(PORTFOLIO_FILE));
   await fs.writeFile(PORTFOLIO_FILE, JSON.stringify(p, null, 2), "utf8");
 }
 async function appendEvent(event: object): Promise<void> {
@@ -363,7 +374,7 @@ async function main(): Promise<void> {
           status: "needs_otp",
           message: "Waiting for OTP — check Viber on your phone.",
         });
-        // High-priority alert across all configured channels (email, ntfy).
+        // ntfy push only — email is reserved for calendar reminders.
         await notify({
           title: "NBG — OTP needed",
           body:
@@ -371,44 +382,39 @@ async function main(): Promise<void> {
             "into the dashboard prompt or run `npm run sync:nbg -- --otp=<code>`. " +
             "OTP is valid for ~5 minutes.",
           priority: "high",
+          channels: { email: false },
         });
         let code = OTP_ARG;
 
-        // Resolution order: --otp arg > NBG_OTP_SOURCE > queue file > stdin TTY.
-        // The queue file is how the web UI delivers OTPs (POST /api/sync/otp).
+        // OTP arrives via whichever channel the user set up — race ALL of them
+        // in parallel and take the first one that yields a code:
+        //   1. Web UI queue file  (dashboard's OTP modal posts to /api/sync/otp)
+        //   2. Webhook listener   (NBG_OTP_SOURCE=webhook → POST to :4848)
+        //   3. stdin TTY          (manual `npm run sync:nbg` from a shell)
+        // No more sequential 90 s waits before the dashboard OTP gets read.
         if (!code) {
           const source = (process.env.NBG_OTP_SOURCE ?? "manual").toLowerCase();
-          if (source !== "manual") {
-            console.log(`[nbg] watching ${source} for a fresh OTP (up to 90s)…`);
-            const found = await waitForOtp(source, 90_000);
-            if (found) {
-              code = found;
-              console.log(`[nbg] auto-detected OTP from ${source}`);
-            }
-          }
-        }
-
-        // Always also poll the web-UI queue file in parallel with stdin —
-        // whichever arrives first wins.
-        if (!code) {
           const isTty = MODE === "setup" || HEADED || input.isTTY;
-          const queueWatcher = waitForQueuedOtp("nbg", 5 * 60_000);
-          let stdinPromise: Promise<string | null> | null = null;
-          if (isTty) {
-            const rl = readline.createInterface({ input, output });
-            stdinPromise = rl
-              .question(
-                "[nbg] enter the OTP from your phone (or POST it via the dashboard): "
-              )
-              .then((s) => {
-                rl.close();
-                return s.trim() || null;
-              });
+          const channels: Promise<string | null>[] = [
+            waitForQueuedOtp("nbg", 5 * 60_000),
+          ];
+          if (source !== "manual" && source !== "file") {
+            channels.push(waitForOtp(source, 5 * 60_000));
           }
-          const winners = await Promise.race(
-            [queueWatcher, stdinPromise].filter(Boolean) as Promise<string | null>[]
-          );
-          if (winners) code = winners;
+          let rl: readline.Interface | null = null;
+          if (isTty) {
+            rl = readline.createInterface({ input, output });
+            channels.push(
+              rl
+                .question(
+                  "[nbg] enter the OTP from your phone (or POST it via the dashboard): "
+                )
+                .then((s) => s.trim() || null)
+            );
+          }
+          const winner = await Promise.race(channels);
+          if (rl) rl.close();
+          if (winner) code = winner;
         }
 
         if (!code) {
@@ -511,12 +517,40 @@ async function main(): Promise<void> {
       console.warn(`   ✗ "${m.label}" → no match`);
       continue;
     }
-    const idx = portfolio.assets.findIndex((a) => a.id === m.assetId);
+    let idx = portfolio.assets.findIndex((a) => a.id === m.assetId);
+    // First-run convenience: if the configured asset id doesn't exist yet,
+    // bootstrap it from the matched NBG account. The user can rename / set
+    // an interest rate / change the type via the dashboard later.
     if (idx === -1) {
-      console.warn(
-        `   ✗ "${m.label}" matched €${result.amount.toFixed(2)} but asset "${m.assetId}" not in portfolio.json`
+      const now = new Date().toISOString();
+      const isInvestment = m.target === "marketValueOverride";
+      const newAsset: Asset = {
+        id: m.assetId,
+        name:
+          isInvestment
+            ? "NBG Investments"
+            : `NBG ${result.matched.label || m.label}`,
+        type: isInvestment ? "tbill" : "deposit",
+        source: "nbg",
+        currency: "EUR",
+        // For deposits, seed iban from the matched label if it looks like one.
+        iban: /^GR[\d*]+$/i.test(result.matched.label || "")
+          ? result.matched.label
+          : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
+      portfolio.assets.push(newAsset);
+      idx = portfolio.assets.length - 1;
+      await appendEvent({
+        type: "asset.created",
+        at: now,
+        asset: newAsset,
+        via: "playwright/nbg (first-run auto-create)",
+      });
+      console.log(
+        `   + "${m.label}" → created asset "${m.assetId}" (${newAsset.type}) — edit via dashboard to refine`
       );
-      continue;
     }
     const asset = portfolio.assets[idx];
     const before = (asset[m.target] as number | undefined) ?? undefined;
@@ -778,6 +812,78 @@ type InvestmentScrapeResult = {
   note?: string;
 };
 
+// Try several strategies to find the portfolio id NBG uses in
+// /investments/info/<id>. Each strategy is independently tolerant — we just
+// return the first one that yields a digit string.
+async function discoverPortfolioId(page: Page): Promise<string | null> {
+  // 1. Explicit override via env (set this if discovery keeps failing).
+  const fromEnv = process.env.NBG_PORTFOLIO_ID?.trim();
+  if (fromEnv && /^\d{4,10}$/.test(fromEnv)) {
+    console.log(`[nbg] using NBG_PORTFOLIO_ID=${fromEnv} from env`);
+    return fromEnv;
+  }
+
+  // 2. Any anchor whose href already contains /investments/info/<id> — most
+  //    reliable when the list view links straight to the detail page.
+  try {
+    const hrefs = await page
+      .locator('a[href*="/investments/info/"]')
+      .evaluateAll((els) =>
+        (els as HTMLAnchorElement[]).map((a) => a.getAttribute("href") || "")
+      );
+    for (const h of hrefs) {
+      const m = h.match(/\/investments\/info\/(\d{4,10})/);
+      if (m) {
+        console.log(`[nbg] portfolio id ${m[1]} discovered via anchor href`);
+        return m[1];
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 3. Greek-label text match — covers historical phrasings:
+  //      Φιλική Ον/σία   /   Φιλική Ονομασία   /   Αριθμός Χαρτοφυλακίου
+  const listText = await page.locator("body").innerText().catch(() => "");
+  const labelPatterns = [
+    /Φιλική\s+Ον[\/\s]?σ?ία[\s\S]{0,40}?(\d{4,10})/,
+    /Φιλική\s+Ονομασία[\s\S]{0,40}?(\d{4,10})/,
+    /Αριθμ[όο]ς\s+Χαρτοφυλακ[ίι]ου[\s\S]{0,40}?(\d{4,10})/,
+    /Κωδικ[όο]ς\s+Χαρτοφυλακ[ίι]ου[\s\S]{0,40}?(\d{4,10})/,
+  ];
+  for (const re of labelPatterns) {
+    const m = listText.match(re);
+    if (m) {
+      console.log(`[nbg] portfolio id ${m[1]} discovered via text label`);
+      return m[1];
+    }
+  }
+
+  // 4. Last-resort heuristic: NBG's portfolio cards expose the id as a
+  //    `data-portfolio-id` / `data-id` attribute, or inside the URL fragment
+  //    after a click. Try DOM data-attributes.
+  try {
+    const dataAttr = await page
+      .locator("[data-portfolio-id], [data-portfolioid], [data-id]")
+      .evaluateAll((els) =>
+        (els as HTMLElement[])
+          .map(
+            (e) =>
+              e.dataset.portfolioId ?? e.dataset.portfolioid ?? e.dataset.id ?? ""
+          )
+          .find((v) => /^\d{4,10}$/.test(v))
+      );
+    if (typeof dataAttr === "string" && dataAttr) {
+      console.log(`[nbg] portfolio id ${dataAttr} discovered via data-* attr`);
+      return dataAttr;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
+}
+
 async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
   // The dashboard's Επενδυτικά card links to a per-portfolio investments page
   // whose URL pattern is #/investments/info/<portfolioId>. We discover it
@@ -845,23 +951,26 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
     .locator(".loading-stage-container")
     .waitFor({ state: "hidden", timeout: 8000 })
     .catch(() => undefined);
+  // Always snap the list page so we can inspect when discovery fails.
+  await snap(page, "05a-investments-list");
 
-  const listText = await page.locator("body").innerText();
-  // Portfolio IDs are 6-8 digit numbers shown after "Φιλική Ον/σία" /
-  // "Φιλική Ονομασία". Take the first match.
-  const idMatch =
-    listText.match(/Φιλική\s+Ον[\/\s]?σ?ία[\s\S]{0,40}?(\d{6,8})/) ??
-    listText.match(/Φιλική\s+Ονομασία[\s\S]{0,40}?(\d{6,8})/);
-  const portfolioId = idMatch?.[1];
+  const portfolioId = await discoverPortfolioId(page);
   if (!portfolioId) {
     return {
       positions: [],
-      note: "couldn't discover portfolio id from list page (no Φιλική Ον/σία match)",
+      note:
+        "couldn't discover portfolio id on the investments list. " +
+        "Inspect 05a-investments-list.png and consider setting NBG_PORTFOLIO_ID in .env.local.",
     };
   }
   console.log(`[nbg] discovered portfolio id ${portfolioId}, drilling in`);
 
-  const detailUrl = `https://ebanking.nbg.gr/web/#/investments/info/${portfolioId}#transferableSecurities`;
+  // Land on the portfolio detail. We do NOT append `#transferableSecurities`
+  // any more — that fragment dropped the page onto the buy/sell tab where
+  // the donut-chart legend acts as a trade trigger; clicking
+  // "Χρηματοπιστωτικά Μέσα" then opened the Αγορά / Πώληση modal instead
+  // of expanding the holdings.
+  const detailUrl = `https://ebanking.nbg.gr/web/#/investments/info/${portfolioId}`;
   await page.goto(detailUrl, { waitUntil: "load", timeout: 15_000 }).catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
   await page
@@ -869,19 +978,62 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
     .first()
     .waitFor({ state: "hidden", timeout: 30_000 })
     .catch(() => undefined);
-  await page.waitForTimeout(2500);
+  await page.keyboard.press("Escape").catch(() => undefined); // dismiss anything stale
+  await page.waitForTimeout(1500);
   await snap(page, "05b-securities-loaded");
   console.log(`[nbg] now at ${page.url().slice(0, 100)}`);
 
-  // The "Προϊόντα Χαρτοφυλακίου" tab shows a "Χρηματοπιστωτικά Μέσα" tile
-  // with the aggregate value. Clicking the tile expands the per-holding
-  // breakdown (ISIN + face + valuation).
-  const fiTile = page.getByText("Χρηματοπιστωτικά Μέσα", { exact: false });
-  const fiCount = await fiTile.count();
-  console.log(`[nbg] "Χρηματοπιστωτικά Μέσα" appears ${fiCount}× on the page`);
-  for (let i = 0; i < fiCount; i++) {
-    console.log(`[nbg] trying click #${i + 1}/${fiCount}`);
-    const ok = await safeClick(fiTile.nth(i), `Χρηματοπιστωτικά Μέσα #${i + 1}`);
+  // Click the "Προϊόντα Χαρτοφυλακίου" tab so the page actually shows the
+  // products-by-category breakdown (not the buy/sell or transactions tab).
+  const productsTab = page
+    .getByRole("tab", { name: /Προϊόντα\s+Χαρτοφυλακίου/i })
+    .first();
+  if ((await productsTab.count().catch(() => 0)) > 0) {
+    console.log('[nbg] clicking "Προϊόντα Χαρτοφυλακίου" tab');
+    await productsTab.click({ timeout: 5000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+  } else {
+    // Fallback: click any element with that text outside of the donut legend.
+    const tabFallback = page
+      .locator(":not(.legend) :not(.recharts-legend-item-text)")
+      .getByText(/Προϊόντα\s+Χαρτοφυλακίου/i)
+      .first();
+    if ((await tabFallback.count().catch(() => 0)) > 0) {
+      console.log('[nbg] clicking products text (no role=tab found)');
+      await tabFallback.click({ timeout: 5000 }).catch(() => undefined);
+      await page.waitForTimeout(1200);
+    }
+  }
+  await snap(page, "05b-products-tab");
+
+  // Now look for the "Χρηματοπιστωτικά Μέσα" tile. We restrict to clickable
+  // elements (role=button, button, link) and explicitly exclude anything
+  // inside the donut-chart legend, where clicking opens the trade modal.
+  // The tile we want has a € amount nearby and is in the products section.
+  const tileCandidates = page.locator(
+    [
+      'button:has-text("Χρηματοπιστωτικά Μέσα")',
+      'a:has-text("Χρηματοπιστωτικά Μέσα")',
+      '[role="button"]:has-text("Χρηματοπιστωτικά Μέσα")',
+      '.tile:has-text("Χρηματοπιστωτικά Μέσα")',
+      '.card:has-text("Χρηματοπιστωτικά Μέσα")',
+      '[class*="tile"]:has-text("Χρηματοπιστωτικά Μέσα")',
+      '[class*="card"]:has-text("Χρηματοπιστωτικά Μέσα")',
+    ].join(", ")
+  );
+  const tileCount = await tileCandidates.count().catch(() => 0);
+  console.log(`[nbg] ${tileCount} clickable Χρηματοπιστωτικά-Μέσα tile(s) detected`);
+  for (let i = 0; i < tileCount; i++) {
+    const tile = tileCandidates.nth(i);
+    const text = (await tile.innerText().catch(() => "")).slice(0, 80);
+    // Skip donut-chart legend items (they only contain the label + percent,
+    // no € amount) — these trigger trade modals when clicked.
+    if (!/€|\d{1,3}(?:\.\d{3})*,\d{2}/.test(text)) {
+      console.log(`   - skipping #${i + 1} (no € amount, likely legend): "${text}"`);
+      continue;
+    }
+    console.log(`[nbg] click #${i + 1}/${tileCount}: "${text.slice(0, 50)}"`);
+    const ok = await safeClick(tile, `Χρηματοπιστωτικά Μέσα tile #${i + 1}`);
     if (!ok) continue;
     await page.waitForTimeout(1500);
     await page
@@ -896,8 +1048,7 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
       await snap(page, "05c-financial-instruments");
       break;
     }
-    // Belt-and-braces: if a transaction modal opened anyway (e.g. a wrapping
-    // anchor we couldn't see), dismiss it without ever clicking inside.
+    // Anything that opened a modal — dismiss with Escape and try the next.
     await page.keyboard.press("Escape").catch(() => undefined);
     await page.waitForTimeout(500);
   }
@@ -1060,6 +1211,19 @@ async function scrapeInvestments(page: Page): Promise<InvestmentScrapeResult> {
   return { positions };
 }
 
+// Greek T-bill / bond ISINs all start with GR000. Anything else discovered
+// via the NBG investments scrape we treat as a bond (closer to the truth than
+// classifying as a stock/etf without quantity data).
+function classifyInvestmentByIsin(isin: string): {
+  type: string;
+  source: string;
+} {
+  if (/^GR000/i.test(isin)) {
+    return { type: "tbill", source: "greek-tbills" };
+  }
+  return { type: "bond", source: "nbg" };
+}
+
 async function applyInvestmentUpdates(
   portfolio: Portfolio,
   positions: InvestmentPosition[]
@@ -1073,11 +1237,36 @@ async function applyInvestmentUpdates(
       details.push(`   ? "${p.name}" (no ISIN) — skipped`);
       continue;
     }
-    const idx = portfolio.assets.findIndex((a) => a.isin === p.isin);
+    let idx = portfolio.assets.findIndex((a) => a.isin === p.isin);
     if (idx === -1) {
+      // First-run: auto-create the position from what NBG showed us. The
+      // user can fill in face value / purchase price / maturity later for
+      // the maturity ladder + YTM calc.
+      const cls = classifyInvestmentByIsin(p.isin);
+      const newAsset: Asset = {
+        id: `${cls.source === "greek-tbills" ? "gr-tbill" : "nbg-inv"}-${p.isin.toLowerCase()}`,
+        name: p.name,
+        type: cls.type,
+        source: cls.source,
+        currency: "EUR",
+        isin: p.isin,
+        marketValueOverride: Number(p.value.toFixed(2)),
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (typeof p.quantity === "number") newAsset.quantity = p.quantity;
+      portfolio.assets.push(newAsset);
+      idx = portfolio.assets.length - 1;
+      await appendEvent({
+        type: "asset.created",
+        at: now,
+        asset: newAsset,
+        via: "playwright/nbg-investments (first-run auto-create)",
+      });
       details.push(
-        `   ? ${p.isin} (€${p.value.toFixed(2)}) — no asset with this ISIN in portfolio.json. Add one to track.`
+        `   + created ${newAsset.id} (${p.isin}, ${cls.type}) — €${p.value.toFixed(2)}`
       );
+      updated++;
       continue;
     }
     const asset = portfolio.assets[idx];

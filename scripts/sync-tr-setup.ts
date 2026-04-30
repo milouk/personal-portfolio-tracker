@@ -121,6 +121,7 @@ async function main() {
       body:
         "Open the dashboard and paste the 4-digit verification code from your TR app/SMS.",
       priority: "high",
+      channels: { email: false }, // ntfy push only — keep inbox clean
     });
 
     // 5-minute window; the SMS itself is short-lived.
@@ -167,6 +168,7 @@ async function main() {
       title: "Trade Republic re-auth complete",
       body: "Click Sync to refresh your portfolio.",
       priority: "low",
+      channels: { email: false },
     });
   } else {
     await patchState("tr", {
