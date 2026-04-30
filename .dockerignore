@@ -1,0 +1,27 @@
+node_modules
+.next
+out
+dist
+build
+.git
+.gitignore
+
+# personal data — never bake into image
+data
+.env*
+!.env.example
+
+# logs and dev cruft
+npm-debug.log*
+yarn-debug.log*
+*.tsbuildinfo
+.DS_Store
+.vscode
+.idea
+
+# Playwright local browsers (image installs its own)
+data/nbg/profile
+
+# Docs
+*.md
+!README.md

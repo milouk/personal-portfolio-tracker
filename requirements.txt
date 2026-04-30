@@ -1,0 +1,5 @@
+# Python dependencies for sync helpers.
+# Install with: pip install -r requirements.txt
+# Or via uv:    uv pip install -r requirements.txt
+
+pytr>=0.2,<1

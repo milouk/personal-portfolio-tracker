@@ -1,0 +1,43 @@
+# Run the dashboard + sync scripts in a single container.
+#
+# Volumes:
+#   ./data           → /app/data            portfolio.json, events.jsonl, NBG browser profile
+#   ./pytr-home      → /data                pytr credentials (~/.pytr lives here, since HOME=/data)
+#
+# Quick start:
+#   docker compose up -d                    # dashboard at http://localhost:3000
+#   docker compose run --rm app pytr login  # one-time TR login (SMS or push)
+#   docker compose exec app npm run sync:tr
+#   docker compose exec app npm run sync:nbg
+#   docker compose exec app npm run sync:all
+#
+# Periodic sync (host crontab example):
+#   0 8 * * *  docker compose -f /path/to/compose.yaml exec -T app npm run sync:all
+#
+# NBG OTP via webhook (when no TTY):
+#   set NBG_OTP_SOURCE=webhook in .env.local; expose 4848 below; POST the code:
+#     curl -d 123456 http://server:4848/otp
+
+services:
+  app:
+    build: .
+    image: portfolio-tracker:latest
+    container_name: portfolio-tracker
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    ports:
+      - "3000:3000"
+      # Uncomment to expose the NBG OTP webhook port for remote OTP delivery.
+      # - "4848:4848"
+    volumes:
+      - ./data:/app/data
+      - pytr-home:/data
+    # Resource limits — sync scripts spawn Chromium so headroom helps.
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+volumes:
+  pytr-home:
