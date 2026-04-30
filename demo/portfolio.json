@@ -17,6 +17,19 @@
       "updatedAt": "2026-04-30T08:00:00.000Z"
     },
     {
+      "id": "demo-iwda",
+      "name": "iShares Core MSCI World",
+      "type": "etf",
+      "source": "trade-republic",
+      "currency": "EUR",
+      "ticker": "IWDA.AS",
+      "isin": "IE00B4L5Y983",
+      "quantity": 92.1,
+      "costBasis": 8400,
+      "createdAt": "2024-09-12T09:00:00.000Z",
+      "updatedAt": "2026-04-30T08:00:00.000Z"
+    },
+    {
       "id": "demo-googl",
       "name": "Alphabet Class A",
       "type": "stock",
@@ -36,9 +49,26 @@
       "source": "trade-republic",
       "currency": "EUR",
       "ticker": "BTC",
+      "coingeckoId": "bitcoin",
       "quantity": 0.085,
       "costBasis": 4200,
       "createdAt": "2023-11-01T09:00:00.000Z",
+      "updatedAt": "2026-04-30T08:00:00.000Z"
+    },
+    {
+      "id": "demo-tr-bond",
+      "name": "Trade Republic Money-Market Bond",
+      "type": "bond",
+      "source": "trade-republic",
+      "currency": "EUR",
+      "isin": "IE0007UPSEA3",
+      "faceValue": 2000,
+      "purchasePrice": 1985,
+      "couponRate": 0.034,
+      "couponFrequency": 1,
+      "issueDate": "2025-12-15",
+      "maturityDate": "2026-12-15",
+      "createdAt": "2025-12-15T09:00:00.000Z",
       "updatedAt": "2026-04-30T08:00:00.000Z"
     },
     {
@@ -69,7 +99,7 @@
     },
     {
       "id": "demo-bank-savings",
-      "name": "Savings Account",
+      "name": "Savings Account (2.5%)",
       "type": "interest_account",
       "source": "nbg",
       "currency": "EUR",
@@ -87,6 +117,19 @@
       "currency": "EUR",
       "amount": 1340.12,
       "iban": "GR45****98765432101",
+      "createdAt": "2023-04-01T09:00:00.000Z",
+      "updatedAt": "2026-04-30T08:00:00.000Z"
+    },
+    {
+      "id": "demo-bank-debit",
+      "name": "Bank Debit Card",
+      "type": "card",
+      "source": "nbg",
+      "currency": "EUR",
+      "cardNetwork": "visa",
+      "cardLast4": "1881",
+      "cardExpiry": "11/27",
+      "cardActive": true,
       "createdAt": "2023-04-01T09:00:00.000Z",
       "updatedAt": "2026-04-30T08:00:00.000Z"
     },
@@ -118,6 +161,21 @@
       "issueDate": "2026-04-04",
       "maturityDate": "2026-07-03",
       "createdAt": "2026-04-04T09:00:00.000Z",
+      "updatedAt": "2026-04-30T08:00:00.000Z"
+    },
+    {
+      "id": "demo-tbill-3",
+      "name": "26W T-Bill (primary)",
+      "type": "tbill",
+      "source": "greek-tbills",
+      "currency": "EUR",
+      "isin": "GR0001000000",
+      "faceValue": 10000,
+      "purchasePrice": 9870,
+      "couponRate": 0,
+      "issueDate": "2026-04-15",
+      "maturityDate": "2026-10-14",
+      "createdAt": "2026-04-15T09:00:00.000Z",
       "updatedAt": "2026-04-30T08:00:00.000Z"
     },
     {

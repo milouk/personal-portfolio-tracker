@@ -1,22 +1,27 @@
-# Run the dashboard + sync scripts in a single container.
+# Personal Portfolio Tracker — single-container deployment.
 #
-# Volumes:
-#   ./data           → /app/data            portfolio.json, events.jsonl, NBG browser profile
-#   ./pytr-home      → /data                pytr credentials (~/.pytr lives here, since HOME=/data)
+# ┌─ Quick start ────────────────────────────────────────────────────────────┐
+# │   cp .env.example .env.local       # fill in the vars you need           │
+# │   docker compose up -d             # dashboard at http://localhost:3000  │
+# └──────────────────────────────────────────────────────────────────────────┘
 #
-# Quick start:
-#   docker compose up -d                    # dashboard at http://localhost:3000
-#   docker compose run --rm app pytr login  # one-time TR login (SMS or push)
-#   docker compose exec app npm run sync:tr
-#   docker compose exec app npm run sync:nbg
-#   docker compose exec app npm run sync:all
+# ┌─ One-time broker logins (interactive) ───────────────────────────────────┐
+# │   docker compose run --rm app pytr login    # Trade Republic (SMS / push)│
+# │   docker compose exec app npm run sync:nbg  # NBG (Viber OTP)            │
+# └──────────────────────────────────────────────────────────────────────────┘
 #
-# Periodic sync (host crontab example):
-#   0 8 * * *  docker compose -f /path/to/compose.yaml exec -T app npm run sync:all
+# ┌─ Periodic sync (host crontab) ───────────────────────────────────────────┐
+# │   0 8 * * *  docker compose -f /path/to/compose.yaml exec -T app \       │
+# │              npm run sync:all                                            │
+# └──────────────────────────────────────────────────────────────────────────┘
 #
-# NBG OTP via webhook (when no TTY):
-#   set NBG_OTP_SOURCE=webhook in .env.local; expose 4848 below; POST the code:
-#     curl -d 123456 http://server:4848/otp
+# ┌─ Passing env vars (any of these work, in priority order) ────────────────┐
+# │   1. shell env when invoking compose:                                    │
+# │        PORTFOLIO_API_TOKEN=xxx docker compose up -d                      │
+# │   2. .env file in the same dir as compose.yaml (auto-loaded by compose)  │
+# │   3. .env.local file (loaded into the container via `env_file` below)    │
+# │   4. `environment:` block overrides below                                │
+# └──────────────────────────────────────────────────────────────────────────┘
 
 services:
   app:
@@ -24,19 +29,50 @@ services:
     image: portfolio-tracker:latest
     container_name: portfolio-tracker
     restart: unless-stopped
+    # All known config keys can be passed via .env.local — see .env.example for
+    # the full list (NBG_*, TR_*, SMTP_*, NTFY_*, PORTFOLIO_API_TOKEN).
     env_file:
-      - .env.local
+      - path: .env.local
+        required: false
+    environment:
+      # Explicit overrides — uncomment what you need, or set in your shell.
+      # Anything left unset falls back to the value in .env.local (if any).
+      NODE_ENV: production
+      # NBG sync
+      NBG_USERNAME: ${NBG_USERNAME:-}
+      NBG_PASSWORD: ${NBG_PASSWORD:-}
+      NBG_MAPPINGS: ${NBG_MAPPINGS:-}
+      NBG_OTP_SOURCE: ${NBG_OTP_SOURCE:-manual}
+      NBG_OTP_PORT: ${NBG_OTP_PORT:-4848}
+      # Trade Republic sync
+      TR_PHONE_NUMBER: ${TR_PHONE_NUMBER:-}
+      TR_PIN: ${TR_PIN:-}
+      # Notifications
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      NOTIFY_EMAIL_FROM: ${NOTIFY_EMAIL_FROM:-}
+      NOTIFY_EMAIL_TO: ${NOTIFY_EMAIL_TO:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh}
+      # API auth — required when exposing beyond localhost.
+      PORTFOLIO_API_TOKEN: ${PORTFOLIO_API_TOKEN:-}
     ports:
       - "3000:3000"
-      # Uncomment to expose the NBG OTP webhook port for remote OTP delivery.
+      # Uncomment to expose the NBG OTP webhook port for remote OTP delivery
+      # (when running headless / no TTY available for stdin prompt).
       # - "4848:4848"
     volumes:
+      # Portfolio data (portfolio.json, events.jsonl, NBG browser profile, caches).
       - ./data:/app/data
+      # pytr persists its session / cookies under $HOME/.pytr — and HOME=/data
+      # in the image, so this volume keeps you logged in across restarts.
       - pytr-home:/data
-    # Resource limits — sync scripts spawn Chromium so headroom helps.
     deploy:
       resources:
         limits:
+          # Sync scripts spawn Chromium (NBG) — give it some headroom.
           memory: 1G
 
 volumes:

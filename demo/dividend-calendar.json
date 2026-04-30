@@ -1,0 +1,20 @@
+{
+  "VWCE.DE": {
+    "exDate": "2026-06-18",
+    "paymentDate": "2026-06-25",
+    "amount": 0.42,
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  },
+  "IWDA.AS": {
+    "exDate": "2026-05-22",
+    "paymentDate": "2026-06-05",
+    "amount": 0.18,
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  },
+  "GOOGL": {
+    "exDate": "2026-06-10",
+    "paymentDate": "2026-06-17",
+    "amount": 0.21,
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  }
+}

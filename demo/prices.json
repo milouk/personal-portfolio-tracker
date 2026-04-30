@@ -6,6 +6,13 @@
     "source": "yahoo",
     "fetchedAt": "2026-04-30T08:00:00.000Z"
   },
+  "demo-iwda": {
+    "symbol": "IWDA.AS",
+    "price": 96.78,
+    "currency": "EUR",
+    "source": "yahoo",
+    "fetchedAt": "2026-04-30T08:00:00.000Z"
+  },
   "demo-googl": {
     "symbol": "GOOGL",
     "price": 374.21,
