@@ -23,6 +23,7 @@ const PAGES_WITH_DYNAMIC = [
   path.join(ROOT, "src", "app", "page.tsx"),
   path.join(ROOT, "src", "app", "(app)", "assets", "page.tsx"),
   path.join(ROOT, "src", "app", "(app)", "history", "page.tsx"),
+  path.join(ROOT, "src", "app", "(app)", "tax", "page.tsx"),
 ];
 
 const ACTIONS_FILE = path.join(ROOT, "src", "lib", "actions.ts");

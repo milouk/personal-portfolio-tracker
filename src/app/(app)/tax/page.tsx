@@ -1,6 +1,7 @@
 import { TaxEstimator } from "@/components/tax/tax-estimator";
 import { computeCardSpend } from "@/lib/server/card-spend";
 import { readMyData } from "@/lib/storage/mydata";
+import { IS_DEMO } from "@/lib/storage/paths";
 
 // Server-side render so we can read non-public env vars and hand the
 // values to the client component as props. Avoids leaking BIRTH_DATE
@@ -9,7 +10,12 @@ import { readMyData } from "@/lib/storage/mydata";
 export const dynamic = "force-dynamic";
 
 export default async function TaxPage() {
-  const defaultBirthDate = process.env.BIRTH_DATE?.trim() || "";
+  // Demo mode hard-codes a plausible birth date so the under-30 benefit
+  // is visibly applied without requiring a BIRTH_DATE env var (and so the
+  // public demo doesn't leak whatever's in a contributor's .env.local).
+  const defaultBirthDate = IS_DEMO
+    ? "1996-04-15"
+    : process.env.BIRTH_DATE?.trim() || "";
   const currentYear = new Date().getFullYear();
   // Look 3 years back; only include years that actually have a synced
   // myDATA snapshot — empty years just clutter the year picker.

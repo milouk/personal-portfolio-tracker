@@ -1,35 +1,51 @@
 # Personal Portfolio Tracker
 
+A self-hosted dashboard for tracking your net worth across brokers, banks,
+T-bills, crypto, and cash — with live prices, automated sync, and per-position
+P/L. **All data stays on your own machine.**
+
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
 [![Tailwind](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss)](https://tailwindcss.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript)](https://www.typescriptlang.org)
+[![Playwright](https://img.shields.io/badge/Playwright-1.59-2EAD33?logo=playwright)](https://playwright.dev)
 [![Deploy demo](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/deploy-demo.yml/badge.svg)](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/deploy-demo.yml)
 [![Release](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/release.yml/badge.svg)](https://github.com/milouk/personal-portfolio-tracker/actions/workflows/release.yml)
 [![GHCR](https://img.shields.io/badge/ghcr.io-milouk%2Fpersonal--portfolio--tracker-2188ff?logo=github)](https://github.com/milouk/personal-portfolio-tracker/pkgs/container/personal-portfolio-tracker)
 [![Latest release](https://img.shields.io/github/v/release/milouk/personal-portfolio-tracker?logo=github)](https://github.com/milouk/personal-portfolio-tracker/releases/latest)
 [![License](https://img.shields.io/badge/license-personal--use-blue)](#license)
 
-A self-hosted dashboard for tracking your net worth across brokers, banks,
-T-bills, crypto, and cash — with live prices, automated sync, and per-position
-P/L. **All data stays on your own machine.**
+![Self-hosted](https://img.shields.io/badge/-self--hosted-1f2937?style=flat)
+![Privacy-first](https://img.shields.io/badge/-privacy--first-1f2937?style=flat)
+![Greek tax](https://img.shields.io/badge/-greek--tax-1f2937?style=flat)
+![Multi-broker](https://img.shields.io/badge/-multi--broker-1f2937?style=flat)
+![Docker](https://img.shields.io/badge/-docker-1f2937?style=flat&logo=docker)
 
-> **Live demo:** [milouk.github.io/personal-portfolio-tracker](https://milouk.github.io/personal-portfolio-tracker)
+> 🌐 **Live demo →** [milouk.github.io/personal-portfolio-tracker](https://milouk.github.io/personal-portfolio-tracker)
 
-## Features
+![Dashboard overview](docs/screenshots/dashboard.png)
 
-- **Live valuations** — ETFs, stocks, crypto and FX update on every page load.
-- **Multi-broker sync** — pull positions and cash directly from your accounts.
-- **Bond / T-bill ladder** — maturity dates, YTM, accrued profit, blended yield.
-- **Greek T-bill auctions** — upcoming auctions and a profit calculator.
-- **Calendar** — bond maturities, ex-dividend dates, dividend payments.
-- **Greek tax estimator** — pre-fills income, εξοδα and withholding from
-  AADE myDATA; computes refund/owed under Law 5246/2025 with the under-30
-  benefit and Art. 39 §9 insurance share.
-- **Email + push reminders** — N days before each event.
-- **Privacy mode** — one click blurs every number on screen for screenshots.
-- **JSON API** — drop-in widget for self-hosted dashboards (Glance, Homepage…).
-- **Dark / light theme** — Nova preset, readable in both modes.
+## Highlights
+
+| | |
+| --- | --- |
+| 📈 **Live valuations** | ETFs, stocks, crypto and FX update on every page load (Yahoo / Stooq / CoinGecko / ECB). |
+| 🏦 **Multi-broker sync** | Pull positions and cash from Trade Republic (pytr) and National Bank of Greece (Playwright). |
+| 🇬🇷 **Greek tax estimator** | 2026 brackets, under-30 benefit, Art. 39 §9 freelancer share, 30 % electronic-spend rule. |
+| 📅 **Calendar + reminders** | Bond maturities, ex-dividend, dividend-payment dates with email/ntfy push N days ahead. |
+| 🔐 **Privacy mode** | One-click blurs every number on screen for screenshots. All data stays local. |
+| 🧩 **JSON API** | Drop-in widget for Glance / Homepage / any custom dashboard. |
+| 🌗 **Dark / light theme** | Nova preset, readable in both. |
+| 🐳 **Docker, multi-arch** | `linux/amd64` and `linux/arm64` images on GHCR, Watchtower-ready. |
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Overview](docs/screenshots/dashboard.png) | ![Assets table](docs/screenshots/assets.png) |
+| **Overview** — net worth, allocation donuts, upcoming events. | **Assets** — every position with native + EUR P/L. |
+| ![Tax estimator](docs/screenshots/tax.png) | ![Transaction history](docs/screenshots/history.png) |
+| **Tax** — refund/owed under Law 5246/2025, with the 30 % rule and the accountant's E3 breakdown. | **History** — full TR timeline, categorised (buys / dividends / interest / card spend). |
 
 ## Quick start
 
@@ -55,29 +71,32 @@ data/
 ├── prices.json             price cache
 ├── fx.json                 EUR/USD cache
 ├── ecb.json                ECB Deposit Facility Rate cache
-└── …
+├── mydata/<year>.json      AADE myDATA snapshot per year
+├── aade-card/<year>.json   AADE myAADE monthly card-spend per year
+└── tr-transactions.jsonl   full Trade Republic timeline
 ```
 
 `data/` is git-ignored. Backup = copy the folder.
 
 ## Live data sources
 
-| Asset class             | Source           | Refresh        |
-| ----------------------- | ---------------- | -------------- |
-| ETFs / stocks (EUR)     | Yahoo Finance    | 60 s           |
-| ETFs / stocks (LSE/USD) | Stooq (fallback) | 60 s           |
-| Crypto                  | CoinGecko        | 60 s           |
-| EUR/USD FX              | ECB / Frankfurter| 1 h            |
-| ECB rate                | ECB SDW          | 24 h           |
-| Greek T-bill auctions   | PDMA             | 24 h           |
-| Dividend calendar       | Yahoo            | 24 h           |
-| Broker positions / cash | per-broker sync  | on demand      |
+| Asset class             | Source            | Refresh   |
+| ----------------------- | ----------------- | --------- |
+| ETFs / stocks (EUR)     | Yahoo Finance     | 60 s      |
+| ETFs / stocks (LSE/USD) | Stooq (fallback)  | 60 s      |
+| Crypto                  | CoinGecko         | 60 s      |
+| EUR/USD FX              | ECB / Frankfurter | 1 h       |
+| ECB rate                | ECB SDW           | 24 h      |
+| Greek T-bill auctions   | PDMA              | 24 h      |
+| Dividend calendar       | Yahoo             | 24 h      |
+| Broker positions / cash | per-broker sync   | on demand |
 
 ## Broker sync
 
 Some sources have no public API, so this project drives them with the same
 tools you'd use yourself — a Python helper for Trade Republic and a headless
-browser for NBG. Both run **only on your machine**, only when you ask them to.
+browser for NBG / AADE. Everything runs **only on your machine**, only when
+you ask it to.
 
 ```bash
 npm run sync:tr         # Trade Republic (push / SMS code on first login)
@@ -88,14 +107,14 @@ npm run sync:all        # all of the above, sequentially
 ```
 
 Or click **Sync** in the header. When an OTP is needed, a modal pops up — paste
-the code and submit. Stale syncs (TR > 60s, NBG > 5min, AADE card > 12h) also
-auto-fire on page load.
+the code and submit. Stale data also auto-fires on page load (TR > 60 s,
+NBG > 5 min, AADE card > 12 h).
 
 ## Tax estimator
 
 A standalone page at `/tax` that computes Greek personal income tax for the
 current and three prior years. Inputs auto-populate from your **myDATA**
-snapshot (the same data your accountant uses to file the E3 form):
+snapshot — the same data your accountant uses to file the E3 form:
 
 - **Gross income** ← `RequestMyIncome`
 - **Έξοδα** ← sum of `E3_585_*` lines from `RequestE3Info` (i.e. only the
@@ -111,19 +130,32 @@ The estimator applies:
   on the €10K–€20K band for 26–30. Auto-derived from `BIRTH_DATE`.
 - **Art. 39 §9 employee share** (8.82 % = 6.67 % main + 2.15 % health) for
   μπλοκάκι freelancers — the client pays the employer share separately.
-- **30 % electronic-spend rule** (E1 codes 049/050): a target-fill bar shows
-  monthly card spend vs. the required 30 % of **net business income**
-  (gross invoices − deductible εξοδα — i.e. πραγματικό εισόδημα, not gross),
-  capped at €6,000. AADE figures come from the Δημόσια Κλήρωση report
-  (`sync:aade-card`); Trade Republic merchant card spend is **stacked on top**
-  because foreign-issued cards (TR / Revolut / N26 / Wise) don't propagate
-  to AADE's lottery feed and Greek freelancers must add them manually.
-  Shortfall × 22 % is the surcharge.
 
 Verified once against an accountant's pre-filing estimate (€4,255 vs ~€4,200,
 **n=1**). Treat as a starting point, not a guarantee — the final filing may
 differ for last-minute reclassifications, depreciation lines, charity /
 medical / ENFIA deductions not in the model.
+
+### 30 % electronic-spend rule
+
+![30% rule card](docs/screenshots/card-spend.png)
+
+E1 codes 049/050 require electronic payments equal to **30 % of net business
+income** (gross invoices − deductible εξοδα — i.e. πραγματικό εισόδημα,
+not gross), capped at €6,000. Shortfall is taxed at 22 %.
+
+The bar uses two sources, stacked:
+
+- **AADE** — what AADE pre-fills from Greek bank reports, scraped via the
+  Δημόσια Κλήρωση report (`sync:aade-card`).
+- **TR** — Trade Republic merchant card spend, **added on top** because
+  foreign-issued cards (TR / Revolut / N26 / Wise) don't propagate to the
+  AADE feed and Greek freelancers must add them manually.
+
+The vertical "target" marker on the bar slides as you change income — at €20K
+net it locks at the €6,000 cap.
+
+### Setup
 
 ```bash
 # myDATA REST API — generate at https://www1.aade.gr/saadeapps2/bookkeeper-web
@@ -143,7 +175,7 @@ Read-only on both APIs: myDATA hits only `RequestMyIncome`,
 or any classification mutator. The myAADE scraper just submits the same
 "Εκτύπωση" form the Δημόσια Κλήρωση page exposes interactively. Requires
 `pdftotext` (poppler) on the host — `brew install poppler` /
-`apt install poppler-utils`.
+`apt install poppler-utils`. The Docker image bundles it.
 
 ## Calendar reminders
 
@@ -219,7 +251,7 @@ APP_TAG=v1.2.3 docker compose up -d
 
 ### Upgrading
 
-Whenever a new release is cut, the new image is on Docker Hub within minutes.
+Whenever a new release is cut, the new image is on GHCR within minutes.
 On your server:
 
 ```bash
@@ -300,10 +332,18 @@ npm run demo:dev      # local preview on :3000
 npm run demo:build    # build for GitHub Pages → out/
 ```
 
+Screenshots in [`docs/screenshots/`](docs/screenshots/) are regenerated by:
+
+```bash
+npm run demo:build
+npx http-server out -p 3001 &
+node scripts/capture-screenshots.mjs
+```
+
 ## Stack
 
 Next.js 16 · React 19 · Tailwind v4 · shadcn/ui · Recharts · Motion ·
-Playwright · pytr
+Playwright · pytr · poppler
 
 ## License
 

@@ -1,0 +1,31 @@
+{
+  "year": 2024,
+  "dateFrom": "2024-01-01",
+  "dateTo": "2024-12-31",
+  "fetchedAt": "2026-04-01T09:00:00.000Z",
+  "income": {
+    "netValue": 28000,
+    "vatAmount": 6720,
+    "withheldAmount": 5600,
+    "grossValue": 28000,
+    "count": 12
+  },
+  "expenses": {
+    "netValue": 4500,
+    "vatAmount": 1080,
+    "withheldAmount": 0,
+    "grossValue": 5580,
+    "count": 22
+  },
+  "e3": {
+    "byCode": {
+      "E3_561_001": { "sum": 28000, "count": 12 },
+      "E3_585_007": { "sum": 480, "count": 12 },
+      "E3_585_013": { "sum": 3200, "count": 7 },
+      "E3_585_016": { "sum": 820, "count": 5 },
+      "E3_587": { "sum": 1200, "count": 1 }
+    },
+    "deductibleE3585Total": 4500,
+    "count": 38
+  }
+}

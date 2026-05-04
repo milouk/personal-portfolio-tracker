@@ -43,8 +43,11 @@ RUN npm run build
 FROM mcr.microsoft.com/playwright:v1.59.1-jammy AS runtime
 
 # Install Python + pip (Playwright image has Node 22 preinstalled).
+# poppler-utils ships `pdftotext`, used by sync-aade-card to extract the
+# monthly Ποσό-Συναλλαγών rows from AADE's Oracle-Reports PDF.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv ca-certificates poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
