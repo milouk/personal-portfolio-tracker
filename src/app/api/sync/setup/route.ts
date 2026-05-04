@@ -14,6 +14,8 @@ const SETUP_SCRIPTS: Record<SyncSource, string | undefined> = {
   nbg: undefined,
   // AADE card sync handles TaxisNet OTP inline on first run; no separate setup.
   "aade-card": undefined,
+  // myDATA REST API uses static credentials, no setup phase.
+  mydata: undefined,
 };
 
 export async function POST(req: Request) {

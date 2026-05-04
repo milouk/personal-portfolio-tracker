@@ -21,7 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 type Source = "tr" | "nbg";
-type AnySource = "tr" | "nbg" | "aade-card";
+type AnySource = "tr" | "nbg" | "aade-card" | "mydata";
 type Status = "idle" | "running" | "needs_otp" | "needs_setup" | "success" | "error";
 
 type SourceState = {
@@ -35,6 +35,7 @@ type SyncState = {
   tr: SourceState;
   nbg: SourceState;
   "aade-card": SourceState;
+  mydata: SourceState;
 };
 
 const POLL_FAST_MS = 1500;
@@ -50,6 +51,7 @@ export function SyncController() {
     tr: { status: "idle" },
     nbg: { status: "idle" },
     "aade-card": { status: "idle" },
+    mydata: { status: "idle" },
   });
   const [otpOpen, setOtpOpen] = useState(false);
   const [otpSource, setOtpSource] = useState<Source>("nbg");
@@ -122,16 +124,20 @@ export function SyncController() {
   const trStatus = state.tr.status;
   const nbgStatus = state.nbg.status;
   const aadeStatus = state["aade-card"].status;
+  const mydataStatus = state.mydata.status;
   useEffect(() => {
     void fetchStateRef.current();
     const anyActive =
-      isActive(trStatus) || isActive(nbgStatus) || isActive(aadeStatus);
+      isActive(trStatus) ||
+      isActive(nbgStatus) ||
+      isActive(aadeStatus) ||
+      isActive(mydataStatus);
     const interval = setInterval(
       () => void fetchStateRef.current(),
       anyActive ? POLL_FAST_MS : POLL_SLOW_MS
     );
     return () => clearInterval(interval);
-  }, [trStatus, nbgStatus, aadeStatus]);
+  }, [trStatus, nbgStatus, aadeStatus, mydataStatus]);
 
   // React to OTP / setup / completion transitions.
   useEffect(() => {
@@ -161,7 +167,7 @@ export function SyncController() {
       }
     }
 
-    for (const s of ["tr", "nbg", "aade-card"] as AnySource[]) {
+    for (const s of ["tr", "nbg", "aade-card", "mydata"] as AnySource[]) {
       const f = state[s].finishedAt;
       if (!f || f === lastFinishRef.current[s]) continue;
       const wasUnset = lastFinishRef.current[s] === undefined;
@@ -170,7 +176,12 @@ export function SyncController() {
         router.refresh();
         continue;
       }
-      const label = s === "aade-card" ? "AADE card" : s.toUpperCase();
+      const label =
+        s === "aade-card"
+          ? "AADE card"
+          : s === "mydata"
+            ? "myDATA"
+            : s.toUpperCase();
       if (state[s].status === "success") {
         toast.success(`${label} synced`, { description: state[s].message });
         if (s === "tr" && /re-auth complete/i.test(state[s].message ?? "")) {
@@ -193,10 +204,11 @@ export function SyncController() {
   }, [state, otpOpen, router, triggerSetup]);
 
   // Auto-sync on first page load if data is stale. Thresholds differ:
-  //  - TR: 60s (silent / fast)
-  //  - NBG: 5min (slower; triggers Viber OTP prompt — don't fire on every refresh)
-  //  - AADE card: 12h (banks report monthly; TaxisNet login is plain
-  //               username/password, no OTP, so re-syncs are silent)
+  //  - TR: 60 s (silent / fast)
+  //  - NBG: 5 min (slower; triggers Viber OTP prompt — don't fire on every refresh)
+  //  - AADE card: 12 h (banks report monthly; TaxisNet plain user/pass, silent)
+  //  - myDATA: 12 h (accountant updates E3 classifications periodically)
+  const ALL_SOURCES = ["tr", "nbg", "aade-card", "mydata"] as const;
   useEffect(() => {
     if (autoSyncedRef.current) return;
     autoSyncedRef.current = true;
@@ -212,17 +224,15 @@ export function SyncController() {
           if (!s.finishedAt) return true;
           return Date.now() - new Date(s.finishedAt).getTime() > thresholdMs;
         };
-        const trStale = isStale(data.tr, 60_000);
-        const nbgStale = isStale(data.nbg, 5 * 60_000);
-        const aadeStale = isStale(data["aade-card"], 12 * 60 * 60_000);
-        if (!trStale && !nbgStale && !aadeStale) return;
         const stale: AnySource[] = [];
-        if (trStale) stale.push("tr");
-        if (nbgStale) stale.push("nbg");
-        if (aadeStale) stale.push("aade-card");
-        // Use "all" only when every source is stale; otherwise fire each one
-        // individually so a fresh source isn't re-triggered redundantly.
-        if (stale.length === 3) {
+        if (isStale(data.tr, 60_000)) stale.push("tr");
+        if (isStale(data.nbg, 5 * 60_000)) stale.push("nbg");
+        if (isStale(data["aade-card"], 12 * 60 * 60_000)) stale.push("aade-card");
+        if (isStale(data.mydata, 12 * 60 * 60_000)) stale.push("mydata");
+        if (stale.length === 0) return;
+        // Fire "all" only when every source is stale; otherwise per-source so
+        // a fresh source isn't re-triggered redundantly.
+        if (stale.length === ALL_SOURCES.length) {
           await fetch("/api/sync", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -244,6 +254,8 @@ export function SyncController() {
         /* swallow */
       }
     })();
+    // ALL_SOURCES is a frozen const tuple; eslint doesn't see that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const trigger = useCallback(async () => {
@@ -299,7 +311,8 @@ export function SyncController() {
   const anyRunning =
     isActive(state.tr.status) ||
     isActive(state.nbg.status) ||
-    isActive(state["aade-card"].status);
+    isActive(state["aade-card"].status) ||
+    isActive(state.mydata.status);
   const trNeedsSetup = state.tr.status === "needs_setup";
   const trErrored = state.tr.status === "error";
   const nbgErrorish = state.nbg.status === "error";
@@ -409,7 +422,8 @@ function statusLabel(s: SyncState): string {
   if (
     s.tr.status === "running" ||
     s.nbg.status === "running" ||
-    s["aade-card"].status === "running"
+    s["aade-card"].status === "running" ||
+    s.mydata.status === "running"
   )
     return "Syncing…";
   return "";

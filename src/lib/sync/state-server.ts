@@ -8,7 +8,7 @@ const ROOT = process.cwd();
 const SYNC_DIR = path.join(ROOT, "data", "sync");
 const STATE_FILE = path.join(SYNC_DIR, "state.json");
 
-export type SyncSource = "tr" | "nbg" | "aade-card";
+export type SyncSource = "tr" | "nbg" | "aade-card" | "mydata";
 type SourceStatus =
   | "idle"
   | "running"
@@ -28,12 +28,14 @@ type SyncState = {
   tr: SourceState;
   nbg: SourceState;
   "aade-card": SourceState;
+  mydata: SourceState;
 };
 
 const DEFAULT_STATE: SyncState = {
   tr: { status: "idle" },
   nbg: { status: "idle" },
   "aade-card": { status: "idle" },
+  mydata: { status: "idle" },
 };
 
 // If a sync claims to still be running long after it should have completed,
@@ -60,7 +62,7 @@ export async function readSyncState(): Promise<SyncState> {
   const state = await rawReadSyncState();
   let patched = false;
   const now = Date.now();
-  for (const s of ["tr", "nbg", "aade-card"] as const) {
+  for (const s of ["tr", "nbg", "aade-card", "mydata"] as const) {
     const src = state[s];
     if (
       (src.status === "running" || src.status === "needs_otp") &&

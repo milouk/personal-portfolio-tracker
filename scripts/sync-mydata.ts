@@ -31,6 +31,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { patchState } from "./lib/sync-state";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -228,6 +229,14 @@ async function main() {
     ? process.env.YEARS.split(",").map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite)
     : [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
 
+  await patchState("mydata", {
+    status: "running",
+    startedAt: new Date().toISOString(),
+    finishedAt: undefined,
+    lastError: undefined,
+    message: `Fetching ${years.length} year${years.length === 1 ? "" : "s"}…`,
+  });
+
   const outDir = path.join(ROOT, "data", "mydata");
   await fs.mkdir(outDir, { recursive: true });
 
@@ -268,9 +277,21 @@ async function main() {
         `withheld €${income.totals.withheldAmount.toFixed(2)}`
     );
   }
+
+  await patchState("mydata", {
+    status: "success",
+    finishedAt: new Date().toISOString(),
+    message: `${years.length} year${years.length === 1 ? "" : "s"} synced`,
+  });
 }
 
 main().catch((err) => {
-  console.error("[mydata] fatal:", err instanceof Error ? err.message : err);
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("[mydata] fatal:", msg);
+  void patchState("mydata", {
+    status: "error",
+    finishedAt: new Date().toISOString(),
+    lastError: msg,
+  }).catch(() => undefined);
   process.exit(1);
 });

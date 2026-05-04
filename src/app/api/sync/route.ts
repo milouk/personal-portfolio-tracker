@@ -12,6 +12,7 @@ const SCRIPTS: Record<SyncSource, string> = {
   tr: "scripts/sync-tr.ts",
   nbg: "scripts/sync-nbg.ts",
   "aade-card": "scripts/sync-aade-card.ts",
+  mydata: "scripts/sync-mydata.ts",
 };
 
 function startSync(source: SyncSource): void {
@@ -55,14 +56,19 @@ export async function POST(req: Request) {
 
   const sources: SyncSource[] =
     src === "all"
-      ? ["tr", "nbg", "aade-card"]
-      : src === "tr" || src === "nbg" || src === "aade-card"
+      ? ["tr", "nbg", "aade-card", "mydata"]
+      : src === "tr" ||
+          src === "nbg" ||
+          src === "aade-card" ||
+          src === "mydata"
         ? [src]
         : [];
 
   if (sources.length === 0) {
     return NextResponse.json(
-      { error: "source must be 'tr', 'nbg', 'aade-card', or 'all'" },
+      {
+        error: "source must be 'tr', 'nbg', 'aade-card', 'mydata', or 'all'",
+      },
       { status: 400 }
     );
   }

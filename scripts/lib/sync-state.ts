@@ -20,7 +20,7 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const SYNC_DIR = path.join(ROOT, "data", "sync");
 const STATE_FILE = path.join(SYNC_DIR, "state.json");
 
-export type SyncSource = "tr" | "nbg" | "aade-card";
+export type SyncSource = "tr" | "nbg" | "aade-card" | "mydata";
 
 export type SourceStatus =
   | "idle"
@@ -44,12 +44,14 @@ export type SyncState = {
   tr: SourceState;
   nbg: SourceState;
   "aade-card": SourceState;
+  mydata: SourceState;
 };
 
 const DEFAULT_STATE: SyncState = {
   tr: { status: "idle" },
   nbg: { status: "idle" },
   "aade-card": { status: "idle" },
+  mydata: { status: "idle" },
 };
 
 async function ensureDir() {
