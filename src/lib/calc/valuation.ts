@@ -6,7 +6,7 @@ import type {
   PriceQuote,
 } from "../types";
 
-export type RateContext = {
+type RateContext = {
   ecbDepositRate?: number;
 };
 

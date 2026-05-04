@@ -53,7 +53,7 @@ export async function fetchYahooQuote(symbol: string): Promise<PriceQuote | null
   }
 }
 
-export type YahooDividendEvent = {
+type YahooDividendEvent = {
   symbol: string;
   exDate?: string; // ISO date
   paymentDate?: string; // ISO date

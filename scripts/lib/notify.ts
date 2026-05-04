@@ -17,7 +17,7 @@
  */
 import nodemailer from "nodemailer";
 
-export type NotifyOptions = {
+type NotifyOptions = {
   title: string;
   body: string;
   /** Pre-rendered HTML for email — falls back to a wrapped <p> of `body`. */
@@ -146,12 +146,4 @@ export async function notify(opts: NotifyOptions): Promise<void> {
       console.warn(`[notify] ${s.kind} failed: ${s.result.error}`);
     }
   }
-}
-
-/**
- * Fire-and-forget: returns immediately so sync flow isn't blocked.
- * Use for status pings; await `notify()` for critical alerts.
- */
-export function notifyAsync(opts: NotifyOptions): void {
-  void notify(opts).catch((e) => console.warn("[notify] error:", e));
 }

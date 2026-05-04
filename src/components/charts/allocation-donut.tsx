@@ -19,7 +19,7 @@ function useMounted(): boolean {
   );
 }
 
-export type AllocationSlice = {
+type AllocationSlice = {
   key: string;
   label: string;
   value: number;

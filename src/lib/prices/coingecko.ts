@@ -26,7 +26,7 @@ const TICKER_MAP: Record<string, string> = {
   USDC: "usd-coin",
 };
 
-export function resolveCoingeckoId(
+function resolveCoingeckoId(
   ticker: string | undefined,
   override: string | undefined
 ): string | null {

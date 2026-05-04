@@ -41,16 +41,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# personal financial data — never commit
-/data/portfolio.json
-/data/events.jsonl
-/data/prices.json
-/data/fx.json
-/data/pdma.json
-/data/ecb.json
-/data/nbg/
-/data/tr-transactions.jsonl
-/data/sync/
+# personal financial data — never commit. Everything under /data/ is runtime
+# state (portfolio, caches, scraped sessions, etc.) and stays per-deployment.
+# Demo seed data lives in /demo/ and is tracked separately.
+/data/
 /.venv/
 
 # Demo build output

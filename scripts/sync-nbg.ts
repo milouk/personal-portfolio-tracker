@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { chromium, type Page } from "playwright";
-import { notify, notifyAsync } from "./lib/notify";
+import { notify } from "./lib/notify";
 import { waitForOtp } from "./lib/otp-sources";
 import {
   clearOtp,
@@ -424,11 +424,12 @@ async function main(): Promise<void> {
             finishedAt: new Date().toISOString(),
             lastError: "OTP timeout",
           });
-          notifyAsync({
+          void notify({
             title: "NBG sync timed out",
             body: "OTP wasn't provided in time.",
             priority: "high",
-          });
+            channels: { email: false },
+          }).catch(() => undefined);
           await ctx.close();
           process.exit(5);
         }

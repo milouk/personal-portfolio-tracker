@@ -11,7 +11,7 @@ export type AssetType =
   | "deposit"
   | "card";
 
-export type CardNetwork = "visa" | "mastercard" | "maestro" | "amex" | "other";
+type CardNetwork = "visa" | "mastercard" | "maestro" | "amex" | "other";
 
 export type AssetSource =
   | "greek-tbills"

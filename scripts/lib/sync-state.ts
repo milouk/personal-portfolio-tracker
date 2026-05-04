@@ -78,7 +78,7 @@ export async function patchState(
   return state;
 }
 
-export function otpFilePath(source: SyncSource): string {
+function otpFilePath(source: SyncSource): string {
   return path.join(SYNC_DIR, `otp-${source}.txt`);
 }
 
@@ -133,8 +133,3 @@ export async function writeOtp(source: SyncSource, code: string): Promise<void> 
   await ensureDir();
   await fs.writeFile(otpFilePath(source), code, "utf8");
 }
-
-export const PATHS = {
-  syncDir: SYNC_DIR,
-  stateFile: STATE_FILE,
-};
