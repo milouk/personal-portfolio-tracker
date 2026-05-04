@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   Plus,
   Pencil,
@@ -33,6 +33,13 @@ import type {
 } from "@/lib/storage/transactions";
 import { cn } from "@/lib/utils";
 
+// Skip Recharts during SSR — it logs noisy width(-1)/height(-1) warnings
+// when there's no DOM to measure. See allocation-donut.tsx for context.
+const subscribeNoop = () => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false);
+}
+
 const ICONS: Record<PortfolioEvent["type"], React.ComponentType<{ className?: string }>> = {
   "asset.created": Plus,
   "asset.updated": Pencil,
@@ -61,6 +68,7 @@ export function HistoryView({
   const [tab, setTab] = useState<"portfolio" | "tr">(
     trTxns.length > 0 ? "tr" : "portfolio"
   );
+  const mounted = useMounted();
   const sorted = [...events].sort(
     (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
   );
@@ -94,6 +102,7 @@ export function HistoryView({
               Net worth over time
             </h2>
             <div className="h-64">
+              {mounted && (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={snapshots}>
                   <defs>
@@ -141,6 +150,7 @@ export function HistoryView({
                   />
                 </AreaChart>
               </ResponsiveContainer>
+              )}
             </div>
           </section>
         )}

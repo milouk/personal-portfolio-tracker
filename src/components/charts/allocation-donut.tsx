@@ -1,8 +1,23 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { motion } from "motion/react";
 import { formatCurrency, formatPercent } from "@/lib/format";
+
+// Recharts' ResponsiveContainer measures its parent's box on first render.
+// During Next's server pass there's no DOM, so it gets 0 × 0 and logs:
+//   "The width(-1) and height(-1) of chart should be greater than 0…"
+// — for every chart on every request, multi-line, drowning the log.
+// Skip the SSR pass entirely with this hook (returns true only after the
+// first client commit) so the chart only ever renders in a real browser.
+const subscribeNoop = () => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false
+  );
+}
 
 export type AllocationSlice = {
   key: string;
@@ -25,6 +40,7 @@ export function AllocationDonut({
     [slices]
   );
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const mounted = useMounted();
 
   const focused = activeIdx !== null ? data[activeIdx] : null;
   const focusedTotal = focused ? focused.value : total;
@@ -37,35 +53,37 @@ export function AllocationDonut({
         <h3 className="text-sm font-medium tracking-tight">{title}</h3>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] sm:gap-6">
-        <div className="relative w-full max-w-[220px]">
-          <ResponsiveContainer width="100%" aspect={1} minHeight={180}>
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="value"
-                innerRadius="68%"
-                outerRadius="98%"
-                paddingAngle={1.5}
-                stroke="none"
-                onMouseEnter={(_, idx) => setActiveIdx(idx)}
-                onMouseLeave={() => setActiveIdx(null)}
-                isAnimationActive
-                animationDuration={500}
-              >
-                {data.map((d, i) => (
-                  <Cell
-                    key={d.key}
-                    fill={d.color}
-                    style={{
-                      transition: "opacity 0.2s",
-                      opacity:
-                        activeIdx === null || activeIdx === i ? 1 : 0.35,
-                    }}
-                  />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
+        <div className="relative w-full max-w-[220px]" style={{ minHeight: 180 }}>
+          {mounted && (
+            <ResponsiveContainer width="100%" aspect={1} minHeight={180}>
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  innerRadius="68%"
+                  outerRadius="98%"
+                  paddingAngle={1.5}
+                  stroke="none"
+                  onMouseEnter={(_, idx) => setActiveIdx(idx)}
+                  onMouseLeave={() => setActiveIdx(null)}
+                  isAnimationActive
+                  animationDuration={500}
+                >
+                  {data.map((d, i) => (
+                    <Cell
+                      key={d.key}
+                      fill={d.color}
+                      style={{
+                        transition: "opacity 0.2s",
+                        opacity:
+                          activeIdx === null || activeIdx === i ? 1 : 0.35,
+                      }}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          )}
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
             <motion.div
               key={focusedLabel}
