@@ -5,9 +5,10 @@
  *
  * Usage:
  *     npm run sync:all
- *     npm run sync:all -- --skip-nbg       # TR + myDATA only
- *     npm run sync:all -- --skip-tr        # NBG + myDATA only
- *     npm run sync:all -- --skip-mydata    # broker syncs only (no AADE)
+ *     npm run sync:all -- --skip-nbg          # TR + myDATA + aade-card only
+ *     npm run sync:all -- --skip-tr           # NBG + myDATA + aade-card only
+ *     npm run sync:all -- --skip-mydata       # skip AADE myDATA REST
+ *     npm run sync:all -- --skip-aade-card    # skip TaxisNet card-spend scrape
  */
 
 import { spawn } from "node:child_process";
@@ -22,6 +23,7 @@ const args = process.argv.slice(2);
 const skipNbg = args.includes("--skip-nbg");
 const skipTr = args.includes("--skip-tr");
 const skipMyData = args.includes("--skip-mydata");
+const skipAadeCard = args.includes("--skip-aade-card");
 
 type StepResult = { name: string; ok: boolean; exitCode: number; durationMs: number };
 
@@ -60,6 +62,15 @@ async function main() {
   if (!skipMyData && process.env.AADE_USER_ID && process.env.AADE_SUBSCRIPTION_KEY) {
     results.push(
       await runStep("myDATA", "npx", ["tsx", "scripts/sync-mydata.ts"])
+    );
+  }
+  if (
+    !skipAadeCard &&
+    process.env.AADE_TAXISNET_USERNAME &&
+    process.env.AADE_TAXISNET_PASSWORD
+  ) {
+    results.push(
+      await runStep("AADE card-spend", "npx", ["tsx", "scripts/sync-aade-card.ts"])
     );
   }
 

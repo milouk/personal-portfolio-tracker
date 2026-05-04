@@ -12,6 +12,8 @@ const SETUP_SCRIPTS: Record<SyncSource, string | undefined> = {
   tr: "scripts/sync-tr-setup.ts",
   // NBG has no separate setup phase — the regular sync handles 2FA inline.
   nbg: undefined,
+  // AADE card sync handles TaxisNet OTP inline on first run; no separate setup.
+  "aade-card": undefined,
 };
 
 export async function POST(req: Request) {

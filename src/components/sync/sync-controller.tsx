@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 type Source = "tr" | "nbg";
+type AnySource = "tr" | "nbg" | "aade-card";
 type Status = "idle" | "running" | "needs_otp" | "needs_setup" | "success" | "error";
 
 type SourceState = {
@@ -30,7 +31,11 @@ type SourceState = {
   finishedAt?: string;
   lastError?: string;
 };
-type SyncState = { tr: SourceState; nbg: SourceState };
+type SyncState = {
+  tr: SourceState;
+  nbg: SourceState;
+  "aade-card": SourceState;
+};
 
 const POLL_FAST_MS = 1500;
 const POLL_SLOW_MS = 8000;
@@ -44,6 +49,7 @@ export function SyncController() {
   const [state, setState] = useState<SyncState>({
     tr: { status: "idle" },
     nbg: { status: "idle" },
+    "aade-card": { status: "idle" },
   });
   const [otpOpen, setOtpOpen] = useState(false);
   const [otpSource, setOtpSource] = useState<Source>("nbg");
@@ -51,7 +57,7 @@ export function SyncController() {
   const [submittingOtp, setSubmittingOtp] = useState(false);
   const [triggering, setTriggering] = useState(false);
 
-  const lastFinishRef = useRef<{ tr?: string; nbg?: string }>({});
+  const lastFinishRef = useRef<Partial<Record<AnySource, string>>>({});
   // After a manual submit, suppress auto-reopen for a brief window so the
   // sync script has time to consume the OTP file and flip state to running.
   const otpSubmittedAtRef = useRef<number>(0);
@@ -113,15 +119,19 @@ export function SyncController() {
   }, [fetchState]);
 
   // Polling: fast while a sync is active, slow otherwise.
+  const trStatus = state.tr.status;
+  const nbgStatus = state.nbg.status;
+  const aadeStatus = state["aade-card"].status;
   useEffect(() => {
     void fetchStateRef.current();
-    const anyActive = isActive(state.tr.status) || isActive(state.nbg.status);
+    const anyActive =
+      isActive(trStatus) || isActive(nbgStatus) || isActive(aadeStatus);
     const interval = setInterval(
       () => void fetchStateRef.current(),
       anyActive ? POLL_FAST_MS : POLL_SLOW_MS
     );
     return () => clearInterval(interval);
-  }, [state.tr.status, state.nbg.status]);
+  }, [trStatus, nbgStatus, aadeStatus]);
 
   // React to OTP / setup / completion transitions.
   useEffect(() => {
@@ -151,7 +161,7 @@ export function SyncController() {
       }
     }
 
-    for (const s of ["tr", "nbg"] as Source[]) {
+    for (const s of ["tr", "nbg", "aade-card"] as AnySource[]) {
       const f = state[s].finishedAt;
       if (!f || f === lastFinishRef.current[s]) continue;
       const wasUnset = lastFinishRef.current[s] === undefined;
@@ -160,8 +170,9 @@ export function SyncController() {
         router.refresh();
         continue;
       }
+      const label = s === "aade-card" ? "AADE card" : s.toUpperCase();
       if (state[s].status === "success") {
-        toast.success(`${s.toUpperCase()} synced`, { description: state[s].message });
+        toast.success(`${label} synced`, { description: state[s].message });
         if (s === "tr" && /re-auth complete/i.test(state[s].message ?? "")) {
           // After successful re-auth, automatically run the actual sync.
           setTimeout(() => {
@@ -173,9 +184,9 @@ export function SyncController() {
           }, 500);
         }
       } else if (state[s].status === "error") {
-        toast.error(`${s.toUpperCase()} sync failed`, { description: state[s].lastError });
+        toast.error(`${label} sync failed`, { description: state[s].lastError });
       } else if (state[s].status === "needs_setup") {
-        toast.warning(`${s.toUpperCase()} re-auth needed`, { description: state[s].message });
+        toast.warning(`${label} re-auth needed`, { description: state[s].message });
       }
       router.refresh();
     }
@@ -184,6 +195,8 @@ export function SyncController() {
   // Auto-sync on first page load if data is stale. Thresholds differ:
   //  - TR: 60s (silent / fast)
   //  - NBG: 5min (slower; triggers Viber OTP prompt — don't fire on every refresh)
+  //  - AADE card: 12h (banks report monthly; TaxisNet login is plain
+  //               username/password, no OTP, so re-syncs are silent)
   useEffect(() => {
     if (autoSyncedRef.current) return;
     autoSyncedRef.current = true;
@@ -201,14 +214,31 @@ export function SyncController() {
         };
         const trStale = isStale(data.tr, 60_000);
         const nbgStale = isStale(data.nbg, 5 * 60_000);
-        if (!trStale && !nbgStale) return;
-        const source: "tr" | "nbg" | "all" =
-          trStale && nbgStale ? "all" : trStale ? "tr" : "nbg";
-        await fetch("/api/sync", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ source }),
-        });
+        const aadeStale = isStale(data["aade-card"], 12 * 60 * 60_000);
+        if (!trStale && !nbgStale && !aadeStale) return;
+        const stale: AnySource[] = [];
+        if (trStale) stale.push("tr");
+        if (nbgStale) stale.push("nbg");
+        if (aadeStale) stale.push("aade-card");
+        // Use "all" only when every source is stale; otherwise fire each one
+        // individually so a fresh source isn't re-triggered redundantly.
+        if (stale.length === 3) {
+          await fetch("/api/sync", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ source: "all" }),
+          });
+        } else {
+          await Promise.all(
+            stale.map((source) =>
+              fetch("/api/sync", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ source }),
+              })
+            )
+          );
+        }
         setTimeout(() => void fetchStateRef.current(), 500);
       } catch {
         /* swallow */
@@ -266,7 +296,10 @@ export function SyncController() {
     }
   }, [otpSource, otpValue]);
 
-  const anyRunning = isActive(state.tr.status) || isActive(state.nbg.status);
+  const anyRunning =
+    isActive(state.tr.status) ||
+    isActive(state.nbg.status) ||
+    isActive(state["aade-card"].status);
   const trNeedsSetup = state.tr.status === "needs_setup";
   const trErrored = state.tr.status === "error";
   const nbgErrorish = state.nbg.status === "error";
@@ -300,7 +333,7 @@ export function SyncController() {
         title={
           trNeedsSetup
             ? "TR session expired — click to re-authenticate"
-            : "Sync TR + NBG now"
+            : "Sync TR + NBG + AADE card-spend now"
         }
       >
         <Icon className={`h-3.5 w-3.5 ${anyRunning ? "animate-spin" : ""}`} />
@@ -373,6 +406,11 @@ export function SyncController() {
 
 function statusLabel(s: SyncState): string {
   if (s.tr.status === "needs_otp" || s.nbg.status === "needs_otp") return "OTP needed";
-  if (s.tr.status === "running" || s.nbg.status === "running") return "Syncing…";
+  if (
+    s.tr.status === "running" ||
+    s.nbg.status === "running" ||
+    s["aade-card"].status === "running"
+  )
+    return "Syncing…";
   return "";
 }

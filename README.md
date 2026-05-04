@@ -80,14 +80,16 @@ tools you'd use yourself — a Python helper for Trade Republic and a headless
 browser for NBG. Both run **only on your machine**, only when you ask them to.
 
 ```bash
-npm run sync:tr      # Trade Republic (push / SMS code on first login)
-npm run sync:nbg     # National Bank of Greece (Viber OTP each login)
-npm run sync:mydata  # AADE myDATA — income / expenses / E3 classifications
-npm run sync:all     # all three, sequentially
+npm run sync:tr         # Trade Republic (push / SMS code on first login)
+npm run sync:nbg        # National Bank of Greece (Viber OTP each login)
+npm run sync:mydata     # AADE myDATA — income / expenses / E3 classifications
+npm run sync:aade-card  # AADE myAADE — monthly card-spend (E1 049/050)
+npm run sync:all        # all of the above, sequentially
 ```
 
 Or click **Sync** in the header. When an OTP is needed, a modal pops up — paste
-the code and submit.
+the code and submit. Stale syncs (TR > 60s, NBG > 5min, AADE card > 12h) also
+auto-fire on page load.
 
 ## Tax estimator
 
@@ -109,6 +111,14 @@ The estimator applies:
   on the €10K–€20K band for 26–30. Auto-derived from `BIRTH_DATE`.
 - **Art. 39 §9 employee share** (8.82 % = 6.67 % main + 2.15 % health) for
   μπλοκάκι freelancers — the client pays the employer share separately.
+- **30 % electronic-spend rule** (E1 codes 049/050): a target-fill bar shows
+  monthly card spend vs. the required 30 % of **net business income**
+  (gross invoices − deductible εξοδα — i.e. πραγματικό εισόδημα, not gross),
+  capped at €6,000. AADE figures come from the Δημόσια Κλήρωση report
+  (`sync:aade-card`); Trade Republic merchant card spend is **stacked on top**
+  because foreign-issued cards (TR / Revolut / N26 / Wise) don't propagate
+  to AADE's lottery feed and Greek freelancers must add them manually.
+  Shortfall × 22 % is the surcharge.
 
 Verified once against an accountant's pre-filing estimate (€4,255 vs ~€4,200,
 **n=1**). Treat as a starting point, not a guarantee — the final filing may
@@ -116,16 +126,24 @@ differ for last-minute reclassifications, depreciation lines, charity /
 medical / ENFIA deductions not in the model.
 
 ```bash
-# Generate API credentials at https://www1.aade.gr/saadeapps2/bookkeeper-web
+# myDATA REST API — generate at https://www1.aade.gr/saadeapps2/bookkeeper-web
 # → "Φόρμα εγγραφής στο myDATA REST API" → "Νέα εγγραφή χρήστη"
-# Then add to .env.local:
 AADE_USER_ID=...
 AADE_SUBSCRIPTION_KEY=...
+
+# myAADE web scrape (for the 30 % electronic-spend rule)
+AADE_TAXISNET_USERNAME=...
+AADE_TAXISNET_PASSWORD=...
+
 BIRTH_DATE=YYYY-MM-DD     # for the under-30 benefit
 ```
 
-Read-only: only `RequestMyIncome`, `RequestMyExpenses`, `RequestE3Info` —
-never `SendInvoices`, `CancelInvoice`, or any classification mutator.
+Read-only on both APIs: myDATA hits only `RequestMyIncome`,
+`RequestMyExpenses`, `RequestE3Info` — never `SendInvoices`, `CancelInvoice`,
+or any classification mutator. The myAADE scraper just submits the same
+"Εκτύπωση" form the Δημόσια Κλήρωση page exposes interactively. Requires
+`pdftotext` (poppler) on the host — `brew install poppler` /
+`apt install poppler-utils`.
 
 ## Calendar reminders
 
@@ -143,14 +161,14 @@ Configure SMTP / ntfy in `.env.local` (see `.env.example`).
 Read-only summary + sync triggers — drop into Glance, Homepage, or any custom
 dashboard:
 
-| Endpoint           | Method | Purpose                              |
-| ------------------ | ------ | ------------------------------------ |
-| `/api/summary`     | GET    | Net worth, P/L, allocation, FX, ECB  |
-| `/api/prices`      | GET    | Live prices + FX (cached)            |
-| `/api/calendar`    | GET    | Upcoming maturities + dividends      |
-| `/api/tbills`      | GET    | Greek T-bill auction calendar        |
-| `/api/sync`        | GET    | Current sync status                  |
-| `/api/sync`        | POST   | Trigger a sync (`tr` / `nbg` / `all`)|
+| Endpoint        | Method | Purpose                                             |
+| --------------- | ------ | --------------------------------------------------- |
+| `/api/summary`  | GET    | Net worth, P/L, allocation, FX, ECB                 |
+| `/api/prices`   | GET    | Live prices + FX (cached)                           |
+| `/api/calendar` | GET    | Upcoming maturities + dividends                     |
+| `/api/tbills`   | GET    | Greek T-bill auction calendar                       |
+| `/api/sync`     | GET    | Current sync status                                 |
+| `/api/sync`     | POST   | Trigger a sync (`tr` / `nbg` / `aade-card` / `all`) |
 
 Set `PORTFOLIO_API_TOKEN` in `.env.local` and pass it via `?token=…`,
 `x-api-token: …`, or `Authorization: Bearer …`. With no token configured the

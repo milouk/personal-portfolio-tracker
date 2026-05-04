@@ -71,7 +71,9 @@ export function summariseTransactions(txns: TrTransaction[]): TrTransactionStats
         stats.totalRealised.sell += a;
         break;
       case "card":
-      case "atm_withdrawal":
+        // Merchant card spend only — CARD_TRANSACTION events. ATM cash and
+        // CARD_AFT (card-funded transfers like Payzy top-ups) are bucketed
+        // separately and excluded from the "card spend" headline figure.
         stats.totalCardSpend += Math.abs(a);
         break;
       case "deposit":

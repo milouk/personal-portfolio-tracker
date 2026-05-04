@@ -107,7 +107,15 @@ function categorise(eventType: string, amountEur: number | null): string {
   if (t === "CARD_ATM_WITHDRAWAL") return "atm_withdrawal";
   if (t === "CARD_VERIFICATION") return "card_verify";
   if (t === "CARD_ORDER_FEE") return "fee";
-  if (t.startsWith("CARD_")) return "card";
+  // CARD_AFT = Account Funding Transaction (e.g. card → wallet top-ups like
+  // Payzy). It looks like a card payment to your statement, but for tax
+  // purposes it's a self-transfer, not merchant spend, so it does NOT count
+  // toward Greek E1 049/050 ("Δαπάνες με ηλεκτρονικά μέσα πληρωμής").
+  if (t === "CARD_AFT") return "card_aft";
+  // Real merchant transactions — the only bucket the 30 % rule cares about.
+  if (t === "CARD_TRANSACTION" || t === "CARD_SUCCESSFUL_TRANSACTION")
+    return "card";
+  if (t.startsWith("CARD_")) return "card_other";
 
   // Documents / reports
   if (

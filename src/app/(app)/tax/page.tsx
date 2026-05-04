@@ -1,4 +1,5 @@
 import { TaxEstimator } from "@/components/tax/tax-estimator";
+import { computeCardSpend } from "@/lib/server/card-spend";
 import { readMyData } from "@/lib/storage/mydata";
 
 // Server-side render so we can read non-public env vars and hand the
@@ -26,11 +27,22 @@ export default async function TaxPage() {
     .sort((a, b) => b - a);
   const defaultTaxYear = syncedYears[0] ?? currentYear;
 
+  // Card-spend (AADE TaxisNet scrape + TR transactions) — one per candidate
+  // year. Always returned even when no AADE snapshot exists; in that case
+  // `aade` is null but `tr` is still computed from tr-transactions.jsonl.
+  const cardSpendList = await Promise.all(
+    candidateYears.map((y) => computeCardSpend(y))
+  );
+  const cardSpendByYear = Object.fromEntries(
+    candidateYears.map((y, i) => [y, cardSpendList[i]] as const)
+  );
+
   return (
     <TaxEstimator
       defaultBirthDate={defaultBirthDate}
       defaultTaxYear={defaultTaxYear}
       mydataByYear={mydataByYear}
+      cardSpendByYear={cardSpendByYear}
     />
   );
 }

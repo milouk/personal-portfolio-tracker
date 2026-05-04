@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Calculator,
   Cake,
+  CreditCard,
   Database,
   Receipt,
   ShieldCheck,
@@ -20,6 +21,11 @@ import {
   type AgeBracket,
   type TaxInput,
 } from "@/lib/calc/tax";
+import {
+  requiredElectronicSpend,
+  shortfallSurcharge,
+  type CardSpendBreakdown,
+} from "@/lib/calc/card-spend";
 import type { MyDataYear } from "@/lib/storage/mydata";
 
 const STORAGE_KEY = "portfolio.taxEstimator.v3";
@@ -126,11 +132,13 @@ export function TaxEstimator({
   defaultBirthDate = "",
   defaultTaxYear,
   mydataByYear = {},
+  cardSpendByYear = {},
 }: {
   defaultBirthDate?: string;
   /** Most recent synced year (or current year if none). */
   defaultTaxYear?: number;
   mydataByYear?: Record<number, MyDataYear | null>;
+  cardSpendByYear?: Record<number, CardSpendBreakdown>;
 }) {
   const initialTaxYear = defaultTaxYear ?? new Date().getFullYear();
   const [inputs, setInputs] = useState<Inputs>(() =>
@@ -468,6 +476,20 @@ export function TaxEstimator({
           </section>
 
           <section className="grid gap-4">
+            {hasIncome && cardSpendByYear[inputs.taxYear] && (
+              <CardSpendCard
+                year={inputs.taxYear}
+                // 30 % rule basis is "πραγματικό εισόδημα" = net business
+                // income (gross minus deductible expenses, E3 code 401),
+                // NOT gross invoices.
+                incomeBasis={Math.max(
+                  numberOr(inputs.grossIncome, 0) -
+                    numberOr(inputs.expenses, 0),
+                  0
+                )}
+                breakdown={cardSpendByYear[inputs.taxYear]}
+              />
+            )}
             {!hasBirthDate || !hasIncome ? <EmptyState /> : <ResultCard result={result} />}
             {myData?.e3 && (
               <ClassificationAnalysis
@@ -617,6 +639,256 @@ function ResultCard({ result }: { result: ReturnType<typeof estimateTax> }) {
         />
       </div>
     </>
+  );
+}
+
+const MONTH_LABEL = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function CardSpendCard({
+  year,
+  incomeBasis,
+  breakdown,
+}: {
+  year: number;
+  /** πραγματικό εισόδημα — net business income for a freelancer. */
+  incomeBasis: number;
+  breakdown: CardSpendBreakdown;
+}) {
+  const aadeTotal = breakdown.aade?.total ?? 0;
+  const trTotal = breakdown.tr.total;
+  // Greek freelancers add foreign-card spend (TR) to AADE manually — TR
+  // doesn't propagate to the AADE feed, so the sum is the real figure.
+  const actualTotal = aadeTotal + trTotal;
+  const required = requiredElectronicSpend(incomeBasis);
+  const { shortfall, surcharge } = shortfallSurcharge(required, actualTotal);
+  const met = shortfall === 0 && required > 0;
+  const monthlyMax = Math.max(
+    1,
+    ...Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      return (
+        (breakdown.aade?.monthly[m] ?? 0) + (breakdown.tr.monthly[m] ?? 0)
+      );
+    })
+  );
+
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border p-5",
+        met
+          ? "border-[color:var(--gain)]/50 bg-[color:var(--gain)]/5"
+          : required > 0
+            ? "border-[color:var(--loss)]/50 bg-[color:var(--loss)]/5"
+            : "border-border/60 bg-card/40"
+      )}
+    >
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+          <h2 className="text-sm font-medium tracking-tight">
+            Electronic spend · 30 % rule · {year}
+          </h2>
+        </div>
+        <span
+          className={cn(
+            "rounded-md px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+            met
+              ? "bg-[color:var(--gain)]/15 text-[color:var(--gain)]"
+              : required > 0
+                ? "bg-[color:var(--loss)]/15 text-[color:var(--loss)]"
+                : "bg-muted text-muted-foreground"
+          )}
+        >
+          {required === 0 ? "n/a" : met ? "met" : "short"}
+        </span>
+      </div>
+
+      {/* Target-fill bar — the centerpiece. Bar width is `required` (30 % of
+          income, capped at €6k). Moves dynamically as income changes. */}
+      {required > 0 ? (
+        <TargetFillBar
+          required={required}
+          actual={actualTotal}
+          incomeBasis={incomeBasis}
+          aade={aadeTotal}
+          tr={trTotal}
+        />
+      ) : (
+        <div className="rounded-md border border-dashed border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
+          Set a gross income (and εξοδα) above to see the required spend.
+        </div>
+      )}
+
+      {shortfall > 0 && (
+        <div className="mt-4 flex items-baseline justify-between rounded-md border border-[color:var(--loss)]/40 bg-[color:var(--loss)]/5 px-3 py-2 text-xs">
+          <span className="text-muted-foreground">22 % surcharge on shortfall</span>
+          <span className="font-numeric font-medium tabular-nums text-[color:var(--loss)]">
+            {formatCurrency(surcharge, "EUR", { decimals: 2 })}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-4 mb-2 text-[11px] text-muted-foreground">
+        Monthly breakdown
+      </div>
+      <div className="grid grid-cols-12 gap-1">
+        {Array.from({ length: 12 }, (_, i) => {
+          const m = i + 1;
+          const a = breakdown.aade?.monthly[m] ?? 0;
+          const t = breakdown.tr.monthly[m] ?? 0;
+          const total = a + t;
+          return (
+            <div
+              key={m}
+              className="flex flex-col items-center gap-1"
+              title={`${MONTH_LABEL[i]} — AADE €${a.toFixed(2)} + TR €${t.toFixed(2)} = €${total.toFixed(2)}`}
+            >
+              <div className="flex h-12 w-full flex-col-reverse overflow-hidden rounded-sm bg-muted/40">
+                <div
+                  className="w-full bg-foreground/40"
+                  style={{ height: `${(a / monthlyMax) * 100}%` }}
+                />
+                <div
+                  className="w-full bg-[color:var(--gain)]"
+                  style={{ height: `${(t / monthlyMax) * 100}%` }}
+                />
+              </div>
+              <span className="text-[9px] uppercase text-muted-foreground">
+                {MONTH_LABEL[i]}
+              </span>
+              <span className="font-numeric text-[9px] tabular-nums text-muted-foreground/80">
+                €{total < 1000 ? total.toFixed(0) : `${(total / 1000).toFixed(1)}k`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {!breakdown.aade ? (
+        <div className="mt-3 rounded-md border border-dashed border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
+          No <code>data/aade-card/{year}.json</code> yet — run{" "}
+          <code className="text-foreground">npm run sync:aade-card -- --year {year}</code>{" "}
+          to scrape monthly totals from TaxisNet. Showing TR-only spend until then.
+        </div>
+      ) : (
+        <div className="mt-3 text-[10px] text-muted-foreground">
+          AADE last sync{" "}
+          {breakdown.aade.fetchedAt
+            ? new Date(breakdown.aade.fetchedAt).toLocaleString("en-IE")
+            : "—"}{" "}
+          · TR card spend is added on top because foreign-issued cards
+          (TR / Revolut / N26 / Wise) don&apos;t propagate to AADE&apos;s
+          lottery feed and Greek freelancers must add them manually.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TargetFillBar({
+  required,
+  actual,
+  incomeBasis,
+  aade,
+  tr,
+}: {
+  required: number;
+  actual: number;
+  /** πραγματικό εισόδημα (net business income) used as the 30 % basis. */
+  incomeBasis: number;
+  aade: number;
+  tr: number;
+}) {
+  // Bar's full track represents the larger of (required, actual) so a surplus
+  // is also visible. The required line is rendered as a vertical marker
+  // wherever it falls in the track; AADE + TR are stacked segments inside the
+  // filled portion so you can see the contribution of each source.
+  const barMax = Math.max(required, actual, 1);
+  const requiredPct = (required / barMax) * 100;
+  const aadePct = (aade / barMax) * 100;
+  const trPct = (tr / barMax) * 100;
+  const met = actual >= required;
+  const shortfall = Math.max(required - actual, 0);
+  const cappedAt6k = required >= 6000;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <div className="font-numeric text-2xl font-medium tabular-nums">
+          €{actual.toFixed(0)}
+          <span className="ml-2 text-sm text-muted-foreground">
+            / €{required.toFixed(0)}
+          </span>
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          {met
+            ? `surplus €${(actual - required).toFixed(0)}`
+            : `need €${shortfall.toFixed(0)} more`}
+        </div>
+      </div>
+
+      <div className="relative h-7 w-full overflow-hidden rounded-md bg-muted/50">
+        {/* AADE base segment */}
+        <div
+          className="absolute inset-y-0 left-0 bg-foreground/40"
+          style={{ width: `${aadePct}%` }}
+        />
+        {/* TR segment stacked next to AADE */}
+        <div
+          className={cn(
+            "absolute inset-y-0",
+            met ? "bg-[color:var(--gain)]" : "bg-[color:var(--loss)]"
+          )}
+          style={{
+            left: `${aadePct}%`,
+            width: `${trPct}%`,
+          }}
+        />
+        {/* Required-target marker line */}
+        <div
+          className="absolute inset-y-0 w-px bg-foreground"
+          style={{ left: `${Math.min(requiredPct, 100)}%` }}
+          aria-hidden
+        />
+        <div
+          className="absolute -top-0.5 -translate-x-1/2 rounded-sm bg-foreground px-1 py-px text-[8px] font-medium uppercase tracking-wider text-background"
+          style={{ left: `${Math.min(requiredPct, 100)}%` }}
+        >
+          target
+        </div>
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+        <span>
+          30 % of net €{incomeBasis.toFixed(0)} ={" "}
+          <span className="font-numeric tabular-nums">
+            €{(incomeBasis * 0.3).toFixed(0)}
+          </span>
+          {cappedAt6k && (
+            <span className="ml-1 text-foreground/70">(capped at €6,000)</span>
+          )}
+        </span>
+        <span className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-sm bg-foreground/40" />
+            AADE €{aade.toFixed(0)}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span
+              className={cn(
+                "h-2 w-2 rounded-sm",
+                met ? "bg-[color:var(--gain)]" : "bg-[color:var(--loss)]"
+              )}
+            />
+            TR €{tr.toFixed(0)}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 }
 
