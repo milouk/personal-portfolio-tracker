@@ -1,12 +1,13 @@
 #!/usr/bin/env -S npx tsx
 /**
- * Run every available sync (TR, NBG) in sequence.
+ * Run every available sync (TR, NBG, myDATA) in sequence.
  * Per-sync failures don't abort the rest — we just collect status and report.
  *
  * Usage:
  *     npm run sync:all
- *     npm run sync:all -- --skip-nbg     # TR only
- *     npm run sync:all -- --skip-tr      # NBG only
+ *     npm run sync:all -- --skip-nbg       # TR + myDATA only
+ *     npm run sync:all -- --skip-tr        # NBG + myDATA only
+ *     npm run sync:all -- --skip-mydata    # broker syncs only (no AADE)
  */
 
 import { spawn } from "node:child_process";
@@ -20,6 +21,7 @@ const ROOT = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const skipNbg = args.includes("--skip-nbg");
 const skipTr = args.includes("--skip-tr");
+const skipMyData = args.includes("--skip-mydata");
 
 type StepResult = { name: string; ok: boolean; exitCode: number; durationMs: number };
 
@@ -55,6 +57,11 @@ async function main() {
       await runStep("NBG", "npx", ["tsx", "scripts/sync-nbg.ts"])
     );
   }
+  if (!skipMyData && process.env.AADE_USER_ID && process.env.AADE_SUBSCRIPTION_KEY) {
+    results.push(
+      await runStep("myDATA", "npx", ["tsx", "scripts/sync-mydata.ts"])
+    );
+  }
 
   console.log("\n──── summary ────");
   for (const r of results) {
@@ -69,6 +76,7 @@ async function main() {
       title: "Portfolio sync — partial failure",
       body: failed.map((r) => `${r.name}: exit ${r.exitCode}`).join(" · "),
       priority: "high",
+      channels: { email: false }, // operational pings → ntfy only
     });
     process.exit(1);
   } else if (results.length > 0) {

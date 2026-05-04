@@ -13,6 +13,7 @@ const NAV = [
   { href: "/", label: "Overview" },
   { href: "/assets", label: "Assets" },
   { href: "/history", label: "History" },
+  { href: "/tax", label: "Tax" },
 ];
 
 // Detect hydration so the icon swap (Sun/Moon, Eye/EyeOff) doesn't mismatch

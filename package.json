@@ -13,6 +13,7 @@
     "sync:tr:setup": "tsx scripts/sync-tr-setup.ts",
     "sync:tr:transactions": "tsx scripts/sync-tr-transactions.ts",
     "sync:all": "tsx scripts/sync-all.ts",
+    "sync:mydata": "tsx scripts/sync-mydata.ts",
     "demo:build": "tsx scripts/build-demo.ts",
     "demo:dev": "DEMO=1 NEXT_PUBLIC_DEMO=1 next dev",
     "notify:calendar": "tsx scripts/notify-calendar.ts"
