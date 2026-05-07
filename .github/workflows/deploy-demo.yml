@@ -1,4 +1,8 @@
-name: Deploy demo to GitHub Pages
+name: Deploy demo to gh-pages
+
+# Builds the static demo and pushes it to the `gh-pages` branch of THIS repo.
+# milouk.github.io's build step (scripts/sync-demos.mjs) clones that branch
+# and serves it at https://milouk.me/projects/portfolio/.
 
 on:
   push:
@@ -14,16 +18,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: deploy-demo
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,22 +40,22 @@ jobs:
 
       - name: Build demo (static export)
         env:
-          # GitHub Pages serves at https://<user>.github.io/<repo>/
-          BASE_PATH: /${{ github.event.repository.name }}
+          BASE_PATH: /projects/portfolio
         run: npm run demo:build
 
-      - uses: actions/configure-pages@v5
+      - name: Add .nojekyll
+        run: touch out/.nojekyll
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Publish to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: ./out
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "deploy: ${{ github.sha }}"
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Trigger personal site rebuild
+        if: success()
+        run: |
+          echo "::notice::Demo published. Trigger https://github.com/milouk/milouk.github.io to rebuild and pull the latest demo into /projects/portfolio/."
