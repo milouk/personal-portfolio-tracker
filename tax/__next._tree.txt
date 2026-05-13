@@ -1,0 +1,6 @@
+:HL["/projects/portfolio/_next/static/chunks/0gwe~32fznz43.css","style"]
+:HL["/projects/portfolio/_next/static/media/051742360c26797e-s.p.0f97p8c3305p~.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/projects/portfolio/_next/static/media/54fc36028e2bb174-s.p.0nkps02--w45i.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/projects/portfolio/_next/static/media/66b33cc02d8f8b9d-s.p.13ww7apd.vf8_.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/projects/portfolio/_next/static/media/8800dfc60902df36-s.p.127vvh92c894b.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"(app)","param":null,"prefetchHints":0,"slots":{"children":{"name":"tax","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}},"staleTime":300,"buildId":"xVgJqueou1KkVVzGHJ3oQ"}
