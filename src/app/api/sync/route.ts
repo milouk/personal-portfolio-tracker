@@ -15,7 +15,26 @@ const SCRIPTS: Record<SyncSource, string> = {
   mydata: "scripts/sync-mydata.ts",
 };
 
+// In-memory lock to prevent spawn races. readSyncState() reads from disk,
+// so two rapid POSTs can both see "idle" and double-spawn before the child
+// writes "running". This Map closes that window in the same Node process.
+// Entries are cleared when the child exits or after a safety timeout that
+// matches the auto-recovery window in state-server.ts.
+const SPAWN_LOCK_MS = 10 * 60 * 1000;
+const spawning = new Map<SyncSource, number>();
+
+function isLocked(source: SyncSource): boolean {
+  const ts = spawning.get(source);
+  if (!ts) return false;
+  if (Date.now() - ts > SPAWN_LOCK_MS) {
+    spawning.delete(source);
+    return false;
+  }
+  return true;
+}
+
 function startSync(source: SyncSource): void {
+  spawning.set(source, Date.now());
   const scriptPath = path.join(ROOT, SCRIPTS[source]);
   // tsx is part of devDependencies; resolve via npx to avoid PATH assumptions.
   const proc = spawn("npx", ["tsx", scriptPath], {
@@ -29,6 +48,8 @@ function startSync(source: SyncSource): void {
       NBG_OTP_SOURCE: process.env.NBG_OTP_SOURCE ?? "manual",
     },
   });
+  proc.once("exit", () => spawning.delete(source));
+  proc.once("error", () => spawning.delete(source));
   // Disown so the API route can return immediately while sync runs.
   proc.unref();
 }
@@ -73,9 +94,15 @@ export async function POST(req: Request) {
     );
   }
 
-  // Refuse to start a duplicate sync of an already-running source.
+  // Refuse to start a duplicate sync. The disk state is authoritative once
+  // the child has written it; the in-memory lock covers the gap between
+  // spawn and that first write so rapid POSTs can't double-fire.
   for (const s of sources) {
-    if (state[s].status === "running" || state[s].status === "needs_otp") {
+    if (
+      isLocked(s) ||
+      state[s].status === "running" ||
+      state[s].status === "needs_otp"
+    ) {
       return NextResponse.json(
         { error: `${s} sync is already in progress`, state },
         { status: 409 }
